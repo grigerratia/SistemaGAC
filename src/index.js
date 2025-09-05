@@ -7,21 +7,15 @@ require('dotenv').config();
 
 // Configura la aplicación Express
 const app = express();
+// El puerto es asignado por el entorno de Render
 const port = process.env.PORT || 3000;
-
-// Configuración para el motor de la IA
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent";
-
-// Configuración de Twilio
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 
 // Usa body-parser para procesar las solicitudes de Twilio
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// --- El endpoint principal para que Twilio envíe mensajes ---
+// --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
+// Esta ruta DEBE coincidir con la URL de webhook en la configuración de Twilio.
+// No cambies esta ruta, ya que está configurada para el endpoint `/whatsapp-webhook`.
 app.post('/whatsapp-webhook', async (req, res) => {
     try {
         // 1. Obtén el mensaje del cuerpo de la solicitud de Twilio
@@ -53,6 +47,9 @@ app.post('/whatsapp-webhook', async (req, res) => {
 
 // --- Función para llamar a la API de Gemini ---
 async function generateGeminiResponse(userMessage) {
+    const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent";
+
     // Estas son las instrucciones que guían el comportamiento de la IA
     const systemInstructions = "Eres un asistente de citas para un consultorio oftalmológico. Mantén un tono profesional, amable y conciso. Tu única función es agendar citas. No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. En esos casos, pide amablemente que el cliente se comunique directamente con el consultorio.";
 
@@ -121,6 +118,9 @@ async function generateGeminiResponse(userMessage) {
 
 // --- Función para enviar un mensaje usando la API de Twilio ---
 async function sendTwilioResponse(to, from, body) {
+    const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
+    const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
+
     const twilioApiUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
 
     const payload = new URLSearchParams();
