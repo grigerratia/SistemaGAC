@@ -23,13 +23,12 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // Esta es la ruta que Twilio intentará contactar cuando reciba un mensaje de WhatsApp.
 // Es crucial que esta ruta (/whatsapp-webhook) coincida con la URL de webhook en la configuración de Twilio.
 app.post('/whatsapp-webhook', (req, res) => {
-    // IMPORTANTE: Se envía una respuesta inmediata a Twilio.
-    // Esto es para evitar los errores de timeout (502 Bad Gateway) que vimos.
-    // Twilio espera una respuesta rápida para saber que el servidor está vivo.
+    // IMPORTANTE: Responde de inmediato a Twilio para evitar los errores de timeout (502 Bad Gateway).
+    // Esta respuesta se envía ANTES de procesar cualquier cosa.
     res.send('OK');
 
-    // Se llama a una función asíncrona para procesar el mensaje en segundo plano.
-    // De esta manera, el servidor responde rápido a Twilio y luego se toma el tiempo que necesite para la lógica de la IA.
+    // Llama a una función asíncrona para procesar el mensaje en segundo plano.
+    // Esto asegura que el servidor de Twilio reciba la confirmación de inmediato.
     processMessage(req.body);
 });
 
@@ -90,31 +89,50 @@ async function generateGeminiResponse(userMessage) {
 
     const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
     
-    try {
-        // Envía la solicitud POST a la API de Gemini.
-        const response = await axios.post(url, payload, {
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-        
-        // Procesa la respuesta de la API de Gemini y extrae el texto generado.
-        const responseData = response.data;
-        if (responseData && responseData.candidates && responseData.candidates.length > 0) {
-            const firstCandidate = responseData.candidates[0];
-            if (firstCandidate.content && firstCandidate.content.parts) {
-                for (const part of firstCandidate.content.parts) {
-                    if (part.text) {
-                        return part.text;
+    // Agregamos un bucle para intentar la solicitud varias veces si falla.
+    const maxRetries = 3;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            // Envía la solicitud POST a la API de Gemini.
+            const response = await axios.post(url, payload, {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            // Procesa la respuesta de la API de Gemini y extrae el texto generado.
+            const responseData = response.data;
+            if (responseData && responseData.candidates && responseData.candidates.length > 0) {
+                const firstCandidate = responseData.candidates[0];
+                if (firstCandidate.content && firstCandidate.content.parts) {
+                    for (const part of firstCandidate.content.parts) {
+                        if (part.text) {
+                            return part.text;
+                        }
                     }
                 }
             }
+        } catch (error) {
+            // Manejo de errores si la llamada a Gemini falla.
+            // Si el error es 429 (Demasiadas solicitudes), reintenta.
+            if (error.response && error.response.status === 429) {
+                console.error(`Error 429: Demasiadas solicitudes. Reintento ${i + 1} de ${maxRetries}...`);
+                const delay = Math.pow(2, i) * 1000; // Retroceso exponencial (1s, 2s, 4s)
+                if (i < maxRetries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue; // Continúa al siguiente ciclo del bucle para reintentar.
+                } else {
+                    console.error("Máximo de reintentos alcanzado. Fallando.");
+                    throw error; // Lanza el error después de todos los reintentos.
+                }
+            } else {
+                // Para cualquier otro error, simplemente lanza el error.
+                console.error(`Error llamando a la API de Gemini: ${error.message}`);
+                throw error;
+            }
         }
-    } catch (error) {
-        // Manejo de errores si la llamada a Gemini falla.
-        console.error(`Error llamando a la API de Gemini: ${error.message}`);
-        throw error;
     }
+
     return null;
 }
 
