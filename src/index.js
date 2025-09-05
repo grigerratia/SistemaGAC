@@ -68,7 +68,8 @@ async function processMessage(body) {
 async function generateGeminiResponse(userMessage) {
     // Obtiene la clave de la API de las variables de entorno.
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent";
+    // Usamos el modelo más actualizado y gratuito para una mayor resiliencia.
+    const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
 
     // Las instrucciones del sistema le dicen a la IA cómo debe comportarse.
     const systemInstructions = "Eres un asistente de citas para un consultorio oftalmológico. Mantén un tono profesional, amable y conciso. Tu única función es agendar citas. No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. En esos casos, pide amablemente que el cliente se comunique directamente con el consultorio.";
@@ -90,7 +91,7 @@ async function generateGeminiResponse(userMessage) {
     const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
     
     // Agregamos un bucle para intentar la solicitud varias veces si falla.
-    const maxRetries = 7; // Aumentamos el número máximo de reintentos.
+    const maxRetries = 10;
     for (let i = 0; i < maxRetries; i++) {
         try {
             // Envía la solicitud POST a la API de Gemini.
@@ -107,6 +108,7 @@ async function generateGeminiResponse(userMessage) {
                 if (firstCandidate.content && firstCandidate.content.parts) {
                     for (const part of firstCandidate.content.parts) {
                         if (part.text) {
+                            console.log("Respuesta de Gemini recibida exitosamente.");
                             return part.text;
                         }
                     }
@@ -117,7 +119,7 @@ async function generateGeminiResponse(userMessage) {
             // Si el error es 429 (Demasiadas solicitudes), reintenta.
             if (error.response && error.response.status === 429) {
                 console.error(`Error 429: Demasiadas solicitudes. Reintento ${i + 1} de ${maxRetries}...`);
-                const delay = Math.pow(2, i) * 5000; // Retroceso exponencial (5s, 10s, 20s, 40s, 80s, etc.)
+                const delay = Math.pow(2, i) * 10000;
                 if (i < maxRetries - 1) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue; // Continúa al siguiente ciclo del bucle para reintentar.
