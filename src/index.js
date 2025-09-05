@@ -21,7 +21,6 @@ const TWILIO_PHONE_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 // Usa body-parser para procesar las solicitudes de Twilio
 app.use(bodyParser.urlencoded({ extended: false }));
 
-// <-- La corrección está aquí: cambiamos '/webhook' a '/whatsapp-webhook' para coincidir con la URL de Twilio
 // --- El endpoint principal para que Twilio envíe mensajes ---
 app.post('/whatsapp-webhook', async (req, res) => {
     try {
