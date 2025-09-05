@@ -90,7 +90,7 @@ async function generateGeminiResponse(userMessage) {
     const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
     
     // Agregamos un bucle para intentar la solicitud varias veces si falla.
-    const maxRetries = 3;
+    const maxRetries = 5; // Aumentamos el número máximo de reintentos.
     for (let i = 0; i < maxRetries; i++) {
         try {
             // Envía la solicitud POST a la API de Gemini.
@@ -117,7 +117,7 @@ async function generateGeminiResponse(userMessage) {
             // Si el error es 429 (Demasiadas solicitudes), reintenta.
             if (error.response && error.response.status === 429) {
                 console.error(`Error 429: Demasiadas solicitudes. Reintento ${i + 1} de ${maxRetries}...`);
-                const delay = Math.pow(2, i) * 1000; // Retroceso exponencial (1s, 2s, 4s)
+                const delay = Math.pow(2, i) * 2000; // Retroceso exponencial (2s, 4s, 8s, 16s, 32s)
                 if (i < maxRetries - 1) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue; // Continúa al siguiente ciclo del bucle para reintentar.
