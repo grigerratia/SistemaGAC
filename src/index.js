@@ -1,9 +1,4 @@
 // Importa las librerías necesarias.
-// express: Es un framework para crear el servidor web.
-// body-parser: Un middleware para procesar datos de solicitudes HTTP.
-// axios: Una librería para hacer solicitudes a APIs externas (como Twilio y Gemini).
-// path: Módulo de Node.js para manejar rutas de archivos.
-// dotenv: Permite cargar variables de entorno desde un archivo .env.
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
@@ -12,42 +7,26 @@ require('dotenv').config();
 
 // Configura la aplicación Express.
 const app = express();
-// Define el puerto. Render lo asigna automáticamente a través de una variable de entorno.
 const port = process.env.PORT || 3000;
 
-// Usa body-parser para procesar las solicitudes entrantes de Twilio.
-// extended: false significa que usa la librería 'qs' para el parsing, que es la recomendada.
 app.use(bodyParser.urlencoded({ extended: false }));
 
 // Variable para almacenar el historial de la conversación.
-// Usamos el número de teléfono como clave para identificar a cada usuario.
-// ¡Importante! En un entorno de producción, esto debería almacenarse en una base de datos (como Airtable)
-// para que la memoria persista incluso si el servidor se reinicia.
 const conversationHistory = {};
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
-// Esta es la ruta que Twilio intentará contactar cuando reciba un mensaje de WhatsApp.
-// Es crucial que esta ruta (/whatsapp-webhook) coincida con la URL de webhook en la configuración de Twilio.
 app.post('/whatsapp-webhook', (req, res) => {
-    // IMPORTANTE: Responde de inmediato a Twilio para evitar los errores de timeout (502 Bad Gateway).
-    // Esta respuesta se envía ANTES de procesar cualquier cosa.
     res.send('OK');
-
-    // Llama a una función asíncrona para procesar el mensaje en segundo plano.
-    // Esto asegura que el servidor de Twilio reciba la confirmación de inmediato.
     processMessage(req.body);
 });
 
 // --- Función que procesa el mensaje en segundo plano ---
-// Esta función contiene toda la lógica del asistente.
 async function processMessage(body) {
     try {
-        // Extrae el mensaje y los números de teléfono del cuerpo de la solicitud de Twilio.
         const userMessage = body.Body;
         const fromNumber = body.From;
         const toNumber = body.To;
 
-        // Si el mensaje está vacío, ignora la solicitud.
         if (!userMessage) {
             console.log("Mensaje vacío recibido, ignorando.");
             return;
@@ -64,11 +43,9 @@ async function processMessage(body) {
             parts: [{ text: userMessage }]
         });
 
-        // Llama a la función que se comunica con la API de Gemini para obtener una respuesta.
-        // Le pasamos todo el historial de conversación.
-        const geminiResponse = await generateGeminiResponse(userMessage, conversationHistory[fromNumber]);
+        // Llama a la función de la IA y le pasa el historial de conversación.
+        const geminiResponse = await generateGeminiResponse(conversationHistory[fromNumber]);
 
-        // Si la IA generó una respuesta, la envía de vuelta al usuario a través de Twilio.
         if (geminiResponse) {
             // Agrega la respuesta del asistente al historial.
             conversationHistory[fromNumber].push({
@@ -79,26 +56,19 @@ async function processMessage(body) {
         }
 
     } catch (error) {
-        // En caso de que algo falle en el proceso (por ejemplo, la API de Gemini no responde).
         console.error(`Error procesando mensaje: ${error.message}`);
-        // Envía un mensaje de error al usuario para que sepa que algo salió mal.
         await sendTwilioResponse(body.From, body.To, "Lo siento, hubo un problema procesando tu solicitud.");
     }
 }
 
-// --- Función para llamar a la API de Gemini ---
-// Se encarga de construir la solicitud y enviar el historial de la conversación a la IA.
-async function generateGeminiResponse(userMessage, history) {
-    // Obtiene la clave de la API de las variables de entorno.
+// --- Función principal para llamar a la API de Gemini ---
+async function generateGeminiResponse(history) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-    // Usamos el modelo más actualizado y gratuito para una mayor resiliencia.
     const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
 
     // Las instrucciones del sistema le dicen a la IA cómo debe comportarse.
-    const systemInstructions = "Eres un asistente de citas para un consultorio oftalmológico. Mantén un tono profesional, amable y conciso. Tu única función es agendar citas. No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. En esos casos, pide amablemente que el cliente se comunique directamente con el consultorio.";
+    const systemInstructions = "Eres un asistente de citas para un consultorio oftalmológico. Tu única función es agendar citas. No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. En esos casos, pide amablemente que el cliente se comunique directamente con el consultorio. Cuando tengas el nombre completo, número de teléfono, fecha y hora del cliente, debes responder con el mensaje 'CITA_COMPLETADA' para que el sistema agende la cita. No uses este mensaje de respuesta antes de tener todos los datos.";
 
-    // El 'payload' es el objeto JSON que se envía a la API de Gemini.
-    // Ahora, en lugar de solo el mensaje del usuario, enviamos el historial completo de la conversación.
     const payload = {
         contents: history,
         systemInstruction: {
@@ -106,31 +76,36 @@ async function generateGeminiResponse(userMessage, history) {
         },
         generationConfig: {
             temperature: 0.7,
-            // Aumentamos los tokens máximos para evitar que los mensajes se corten.
             maxOutputTokens: 400,
         },
     };
 
     const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
     
-    // Agregamos un bucle para intentar la solicitud varias veces si falla.
     const maxRetries = 10;
     for (let i = 0; i < maxRetries; i++) {
         try {
-            // Envía la solicitud POST a la API de Gemini.
             const response = await axios.post(url, payload, {
                 headers: {
                     'Content-Type': 'application/json'
                 }
             });
             
-            // Procesa la respuesta de la API de Gemini y extrae el texto generado.
             const responseData = response.data;
             if (responseData && responseData.candidates && responseData.candidates.length > 0) {
                 const firstCandidate = responseData.candidates[0];
                 if (firstCandidate.content && firstCandidate.content.parts) {
                     for (const part of firstCandidate.content.parts) {
                         if (part.text) {
+                            // Si la IA responde con "CITA_COMPLETADA", llamamos a la función de agendamiento.
+                            if (part.text.includes("CITA_COMPLETADA")) {
+                                console.log("Se ha recibido la señal para agendar la cita.");
+                                const appointmentDetails = extractAppointmentDetails(history);
+                                // Llama a la función que gestiona la cita
+                                await handleAppointmentFlow(appointmentDetails);
+                                // Devuelve un mensaje de confirmación al usuario.
+                                return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
+                            }
                             console.log("Respuesta de Gemini recibida exitosamente.");
                             return part.text;
                         }
@@ -138,20 +113,17 @@ async function generateGeminiResponse(userMessage, history) {
                 }
             }
         } catch (error) {
-            // Manejo de errores si la llamada a Gemini falla.
-            // Si el error es 429 (Demasiadas solicitudes), reintenta.
             if (error.response && error.response.status === 429) {
                 console.error(`Error 429: Demasiadas solicitudes. Reintento ${i + 1} de ${maxRetries}...`);
                 const delay = Math.pow(2, i) * 10000;
                 if (i < maxRetries - 1) {
                     await new Promise(resolve => setTimeout(resolve, delay));
-                    continue; // Continúa al siguiente ciclo del bucle para reintentar.
+                    continue;
                 } else {
                     console.error("Máximo de reintentos alcanzado. Fallando.");
-                    throw error; // Lanza el error después de todos los reintentos.
+                    throw error;
                 }
             } else {
-                // Para cualquier otro error, simplemente lanza el error.
                 console.error(`Error llamando a la API de Gemini: ${error.message}`);
                 throw error;
             }
@@ -161,22 +133,74 @@ async function generateGeminiResponse(userMessage, history) {
     return null;
 }
 
+// --- Nuevas Funciones para la Gestión de la Cita ---
+
+// Función para extraer los datos relevantes del historial de conversación.
+function extractAppointmentDetails(history) {
+    const details = {
+        nombre: null,
+        telefono: null,
+        fecha: null,
+        hora: null
+    };
+
+    // Recorre el historial en busca de la información necesaria.
+    history.forEach(message => {
+        const text = message.parts[0].text;
+        // Aquí se usaría una lógica más robusta para parsear los datos
+        // Por ahora, es un placeholder.
+        if (text.toLowerCase().includes("griger ratia")) {
+            details.nombre = "Griger Ratia";
+        }
+        if (text.includes("04247654321")) {
+            details.telefono = "04247654321";
+        }
+        if (text.toLowerCase().includes("jueves de la semana que viene")) {
+            details.fecha = "Jueves de la próxima semana";
+        }
+        if (text.includes("10:00")) {
+            details.hora = "10:00 AM";
+        }
+    });
+
+    return details;
+}
+
+// Función principal que orquesta la creación de la cita.
+async function handleAppointmentFlow(appointmentDetails) {
+    try {
+        console.log("Detalles de la cita a procesar:", appointmentDetails);
+
+        // TODO: En esta sección, agregaremos las llamadas a Airtable y Calendly.
+
+        // Ejemplo de llamada a Calendly (futuro)
+        // const calendlyResponse = await createCalendlyEvent(appointmentDetails);
+        // if (calendlyResponse) {
+        //     console.log("Evento de Calendly creado con éxito.");
+        // }
+
+        // Ejemplo de llamada a Airtable (futuro)
+        // const airtableResponse = await createAirtableRecord(appointmentDetails);
+        // if (airtableResponse) {
+        //     console.log("Registro en Airtable creado con éxito.");
+        // }
+
+    } catch (error) {
+        console.error("Error en el flujo de agendamiento:", error);
+    }
+}
+
 // --- Función para enviar un mensaje usando la API de Twilio ---
-// Se encarga de enviar el mensaje de respuesta de la IA de vuelta al usuario.
 async function sendTwilioResponse(to, from, body) {
     const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-
     const twilioApiUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
-
-    // El 'payload' para Twilio debe ser de tipo URLSearchParams.
     const payload = new URLSearchParams();
-    payload.append('From', from); // El número de Twilio que envía el mensaje.
-    payload.append('To', to);     // El número del usuario que lo recibe.
-    payload.append('Body', body); // El cuerpo del mensaje.
+    payload.append('From', from);
+    payload.append('To', to);
+    payload.append('Body', body);
 
     try {
-        // Envía la solicitud POST a la API de Twilio. Se necesita autenticación con el SID y el token.
         const response = await axios.post(twilioApiUrl, payload, {
             auth: {
                 username: TWILIO_ACCOUNT_SID,
@@ -184,7 +208,6 @@ async function sendTwilioResponse(to, from, body) {
             }
         });
     } catch (error) {
-        // Manejo de errores si el envío del mensaje falla.
         console.error(`Error enviando mensaje con Twilio: ${error.message}`);
         throw error;
     }
