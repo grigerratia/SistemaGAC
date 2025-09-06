@@ -179,12 +179,12 @@ async function createAirtableRecord(details) {
 // --- Nueva funcionalidad: Generación de PDF de calendario ---
 app.get('/generate-pdf', async (req, res) => {
     try {
+        console.log('Iniciando la generación del PDF...');
         const doc = new PDFDocument();
         const year = req.query.year || moment().year();
         const month = req.query.month ? parseInt(req.query.month) - 1 : moment().month(); // Los meses son 0-11
         const startOfMonth = moment().year(year).month(month).startOf('month');
-        const endOfMonth = moment().year(year).month(month).endOf('month');
-
+        
         // Headers
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename="calendario_${startOfMonth.format('MMMM_YYYY')}.pdf"`);
@@ -208,21 +208,31 @@ app.get('/generate-pdf', async (req, res) => {
         });
         doc.font('Helvetica');
         doc.rect(left, tableTop + 20, colWidth * 7, 1).fill('#000');
-
-        // Obtener citas de Airtable
+        
+        // Obteniendo las citas de Airtable de forma más robusta
+        const filterMonth = startOfMonth.format('YYYY-MM');
+        console.log(`Buscando citas para el mes: ${filterMonth}`);
         const records = await airtableBase('Citas').select({
             view: "Grid view",
-            filterByFormula: `AND(IS_AFTER({Fecha}, '${startOfMonth.format('YYYY-MM-DD')}'), IS_BEFORE({Fecha}, '${endOfMonth.format('YYYY-MM-DD')}'))`
+            filterByFormula: `DATETIME_FORMAT({Fecha}, 'YYYY-MM') = '${filterMonth}'`
         }).all();
-
+        
+        if (records.length === 0) {
+            console.log("No se encontraron citas para este mes.");
+            doc.moveDown(2).text('No hay citas agendadas para este mes.');
+        } else {
+            console.log(`Se encontraron ${records.length} citas.`);
+        }
+        
+        // Proceso de dibujo del calendario y citas
         let currentDay = startOfMonth.clone();
         let currentRow = 0;
-        while (currentDay.isSameOrBefore(endOfMonth, 'day')) {
+        while (currentDay.isSame(startOfMonth, 'month')) {
             const dayOfWeek = currentDay.weekday();
             const x = left + dayOfWeek * colWidth;
             const y = tableTop + 25 + currentRow * rowHeight;
             doc.text(currentDay.format('DD'), x + 5, y + 5);
-
+            
             const citasDelDia = records.filter(record => moment(record.fields.Fecha).isSame(currentDay, 'day'));
             let textY = y + 20;
             citasDelDia.forEach(cita => {
@@ -242,8 +252,8 @@ app.get('/generate-pdf', async (req, res) => {
         doc.end();
 
     } catch (error) {
-        console.error("Error generando PDF:", error);
-        res.status(500).send("Error generando el archivo PDF.");
+        console.error("Error generando PDF:", error.message);
+        res.status(500).send("Hubo un problema al generar el archivo PDF. Revisa la consola del servidor para más detalles.");
     }
 });
 
@@ -316,5 +326,5 @@ async function sendTwilioResponse(to, from, body) {
 // Inicia el servidor de Express en el puerto configurado.
 app.listen(port, () => {
     console.log(`Servidor escuchando en http://localhost:${port}`);
-    console.log(`Para generar el PDF, ve a http://localhost:${port}/generate-pdf?year=2025&month=10`);
+    console.log(`Para generar el PDF, ve a http://localhost:${port}/generate-pdf?year=2025&month=09`);
 });
