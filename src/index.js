@@ -5,9 +5,8 @@ const axios = require('axios');
 const path = require('path');
 require('dotenv').config();
 
-// Se importan las librerías de Airtable y Calendly.
+// Se importan las librerías de Airtable. La de Calendly ya no es necesaria.
 const Airtable = require('airtable');
-const calendly = require('calendly-v2');
 
 // Configura la aplicación Express.
 const app = express();
@@ -18,10 +17,9 @@ app.use(bodyParser.urlencoded({ extended: false }));
 // Variable para almacenar el historial de la conversación.
 const conversationHistory = {};
 
-// Configura Airtable y Calendly con las variables de entorno.
-// Esto es esencial para que la aplicación se conecte con las APIs.
+// Configura Airtable con las variables de entorno.
+// Esto es esencial para que la aplicación se conecte con la API.
 const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base(process.env.AIRTABLE_BASE_ID);
-const calendlyClient = new calendly({ token: process.env.CALENDLY_PERSONAL_ACCESS_TOKEN });
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 app.post('/whatsapp-webhook', (req, res) => {
@@ -195,27 +193,37 @@ async function createAirtableRecord(details) {
     }
 }
 
-// Función para crear un nuevo evento en Calendly.
+// Función para crear un nuevo evento en Calendly usando axios.
 async function createCalendlyEvent(details) {
-    try {
-        // En un escenario real, necesitarías encontrar el URI del tipo de evento
-        // y del usuario de destino. Para este ejemplo, usamos un placeholder.
-        const eventTypeUri = process.env.CALENDLY_EVENT_TYPE_URI;
-        const inviteeEmail = "ejemplo@ejemplo.com"; // Usa un correo de prueba
+    const CALENDLY_API_URL = "https://api.calendly.com";
+    const CALENDLY_TOKEN = process.env.CALENDLY_PERSONAL_ACCESS_TOKEN;
+    const CALENDLY_EVENT_TYPE_URI = process.env.CALENDLY_EVENT_TYPE_URI;
 
-        const response = await calendlyClient.post('/scheduled_events', {
+    try {
+        const inviteeEmail = "ejemplo@ejemplo.com"; // Usa un correo de prueba
+        const inviteeName = details.nombre;
+        const startTime = `${details.fecha}T${details.hora}:00Z`; // Combina fecha y hora en formato ISO 8601
+
+        const payload = {
             invitee_email: inviteeEmail,
-            event_type: eventTypeUri,
+            event_type: CALENDLY_EVENT_TYPE_URI,
             invitee: {
-                name: details.nombre,
+                name: inviteeName,
                 email: inviteeEmail,
             },
-            date: details.fecha, // Calendly requiere un formato de fecha específico.
-            time: details.hora
+            start_time: startTime
+        };
+
+        const response = await axios.post(`${CALENDLY_API_URL}/scheduled_events`, payload, {
+            headers: {
+                'Authorization': `Bearer ${CALENDLY_TOKEN}`,
+                'Content-Type': 'application/json'
+            }
         });
-        return response;
+
+        return response.data;
     } catch (error) {
-        console.error("Error creando evento en Calendly:", error);
+        console.error("Error creando evento en Calendly:", error.response ? error.response.data : error.message);
         throw error;
     }
 }
