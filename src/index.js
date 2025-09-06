@@ -150,6 +150,10 @@ async function generateGeminiResponse(history) {
 // --- Funciones para la Gestión de la Cita ---
 async function handleAppointmentFlow(appointmentDetails) {
     try {
+        // Log para verificar las variables de entorno
+        console.log("Verificando AIRTABLE_API_KEY:", process.env.AIRTABLE_API_KEY ? "Cargada" : "Falta");
+        console.log("Verificando AIRTABLE_BASE_ID:", process.env.AIRTABLE_BASE_ID ? "Cargada" : "Falta");
+        
         console.log("Detalles de la cita a procesar:", appointmentDetails);
         const existingRecord = await findRecordByPhoneNumber(appointmentDetails.telefono);
 
