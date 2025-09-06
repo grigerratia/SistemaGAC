@@ -5,7 +5,7 @@ const axios = require('axios');
 const path = require('path');
 require('dotenv').config();
 
-// Se importan las librerías de Airtable.
+// Se importa la librería de Airtable.
 const Airtable = require('airtable');
 
 // Configura la aplicación Express.
@@ -19,6 +19,11 @@ const conversationHistory = {};
 
 // Configura Airtable con las variables de entorno.
 const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base(process.env.AIRTABLE_BASE_ID);
+
+// Configura las credenciales de Calendly
+const CALENDLY_API_URL = 'https://api.calendly.com';
+const CALENDLY_ACCESS_TOKEN = process.env.CALENDLY_PERSONAL_ACCESS_TOKEN;
+const CALENDLY_EVENT_TYPE_URI = process.env.CALENDLY_EVENT_TYPE_URI;
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 app.post('/whatsapp-webhook', (req, res) => {
@@ -93,7 +98,7 @@ async function generateGeminiResponse(history) {
     };
 
     const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
-    
+
     const maxRetries = 10;
     for (let i = 0; i < maxRetries; i++) {
         try {
@@ -102,7 +107,7 @@ async function generateGeminiResponse(history) {
                     'Content-Type': 'application/json'
                 }
             });
-            
+
             const responseData = response.data;
             if (responseData && responseData.candidates && responseData.candidates.length > 0) {
                 const firstCandidate = responseData.candidates[0];
@@ -143,23 +148,24 @@ async function generateGeminiResponse(history) {
     return null;
 }
 
-// --- Nuevas Funciones para la Gestión de la Cita ---
+// --- Funciones para la Gestión de la Cita ---
 async function handleAppointmentFlow(appointmentDetails) {
     try {
         console.log("Detalles de la cita a procesar:", appointmentDetails);
-
+        
+        // 1. Crear el registro en Airtable
         const airtableResponse = await createAirtableRecord(appointmentDetails);
         if (airtableResponse) {
             console.log("Registro en Airtable creado con éxito.");
         }
 
-        const calendlyResponse = await createCalendlyEvent(appointmentDetails);
-        if (calendlyResponse) {
-            console.log("Evento de Calendly creado con éxito.");
-        }
+        // 2. Crear el evento en Calendly
+        await createCalendlyEvent(appointmentDetails);
+        console.log("Evento en Calendly creado con éxito.");
 
     } catch (error) {
         console.error("Error en el flujo de agendamiento:", error);
+        throw error;
     }
 }
 
@@ -182,37 +188,41 @@ async function createAirtableRecord(details) {
     }
 }
 
-// Función para crear un nuevo evento en Calendly usando axios.
+// Función para crear un evento en Calendly.
 async function createCalendlyEvent(details) {
-    const CALENDLY_API_URL = "https://api.calendly.com";
-    const CALENDLY_TOKEN = process.env.CALENDLY_PERSONAL_ACCESS_TOKEN;
-    const CALENDLY_EVENT_TYPE_URI = process.env.CALENDLY_EVENT_TYPE_URI;
+    if (!CALENDLY_ACCESS_TOKEN || !CALENDLY_EVENT_TYPE_URI) {
+        throw new Error("Tokens de Calendly no configurados en .env");
+    }
+
+    // Convierte la fecha y hora a un formato ISO 8601 con zona horaria.
+    const start_time = `${details.fecha}T${details.hora}:00Z`;
+    const end_time = new Date(new Date(start_time).getTime() + 30 * 60000).toISOString(); // 30 minutos de duración
+
+    const payload = {
+        event_type: CALENDLY_EVENT_TYPE_URI,
+        invitees: [
+            {
+                email: 'cliente@example.com', // Usar un email de contacto o solicitarlo
+                first_name: details.nombre.split(' ')[0],
+                last_name: details.nombre.split(' ').slice(1).join(' '),
+                phone_number: details.telefono
+            }
+        ],
+        start_time: start_time,
+        end_time: end_time,
+        location: 'El consultorio', // Puedes personalizar este valor
+    };
 
     try {
-        const inviteeEmail = "ejemplo@ejemplo.com";
-        const inviteeName = details.nombre;
-        const startTime = `${details.fecha}T${details.hora}:00Z`;
-
-        const payload = {
-            invitee_email: inviteeEmail,
-            event_type: CALENDLY_EVENT_TYPE_URI,
-            invitee: {
-                name: inviteeName,
-                email: inviteeEmail,
-            },
-            start_time: startTime
-        };
-
         const response = await axios.post(`${CALENDLY_API_URL}/scheduled_events`, payload, {
             headers: {
-                'Authorization': `Bearer ${CALENDLY_TOKEN}`,
+                'Authorization': `Bearer ${CALENDLY_ACCESS_TOKEN}`,
                 'Content-Type': 'application/json'
             }
         });
-
         return response.data;
     } catch (error) {
-        console.error("Error creando evento en Calendly:", error.response ? error.response.data : error.message);
+        console.error("Error creando evento en Calendly:", error.response?.data || error.message);
         throw error;
     }
 }
