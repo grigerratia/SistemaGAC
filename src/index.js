@@ -5,7 +5,7 @@ const axios = require('axios');
 const path = require('path');
 require('dotenv').config();
 
-// Se importan las librerías de Airtable. La de Calendly ya no es necesaria.
+// Se importan las librerías de Airtable.
 const Airtable = require('airtable');
 
 // Configura la aplicación Express.
@@ -18,7 +18,6 @@ app.use(bodyParser.urlencoded({ extended: false }));
 const conversationHistory = {};
 
 // Configura Airtable con las variables de entorno.
-// Esto es esencial para que la aplicación se conecte con la API.
 const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base(process.env.AIRTABLE_BASE_ID);
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
@@ -69,8 +68,6 @@ async function generateGeminiResponse(history) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
 
-    // Instrucciones actualizadas: le indicamos a la IA que debe interpretar
-    // las fechas y convertirlas a un formato específico.
     const systemInstructions = "Eres un asistente de citas para un consultorio oftalmológico. Tu única función es agendar citas. Debes ser capaz de interpretar fechas y horas a partir de expresiones como 'mañana', 'el lunes de la semana que viene', 'pasado mañana' o 'el jueves siguiente', y convertirlas a un formato de fecha completo. No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. Cuando tengas el nombre completo, número de teléfono, fecha y hora del cliente, debes devolver un objeto JSON con los siguientes campos: 'nombre', 'telefono', 'fecha' y 'hora'. La fecha debe estar en formato 'YYYY-MM-DD'. No incluyas ningún otro texto o puntuación antes o después del JSON.";
 
     const payload = {
@@ -81,8 +78,6 @@ async function generateGeminiResponse(history) {
         generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 400,
-            // Esta es la configuración clave: le decimos a Gemini que la respuesta
-            // debe ser un objeto JSON con una estructura específica.
             responseMimeType: "application/json",
             responseSchema: {
                 type: "OBJECT",
@@ -115,16 +110,11 @@ async function generateGeminiResponse(history) {
                     for (const part of firstCandidate.content.parts) {
                         if (part.text) {
                             try {
-                                // Intenta parsear la respuesta como JSON.
                                 const appointmentDetails = JSON.parse(part.text);
                                 console.log("Se ha recibido la señal para agendar la cita y los datos JSON:", appointmentDetails);
-
-                                // Llama a la función que gestiona la cita con los datos extraídos por la IA.
                                 await handleAppointmentFlow(appointmentDetails);
-                                // Devuelve un mensaje de confirmación al usuario.
                                 return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
                             } catch (e) {
-                                // Si no es un JSON válido, significa que la IA está en modo conversacional.
                                 console.log("Respuesta de Gemini recibida exitosamente, en modo conversacional.");
                                 return part.text;
                             }
@@ -154,18 +144,15 @@ async function generateGeminiResponse(history) {
 }
 
 // --- Nuevas Funciones para la Gestión de la Cita ---
-// Esta función principal orquesta la creación de la cita en Airtable y Calendly.
 async function handleAppointmentFlow(appointmentDetails) {
     try {
         console.log("Detalles de la cita a procesar:", appointmentDetails);
 
-        // Paso 1: Crea un registro en Airtable para guardar los datos del cliente.
         const airtableResponse = await createAirtableRecord(appointmentDetails);
         if (airtableResponse) {
             console.log("Registro en Airtable creado con éxito.");
         }
 
-        // Paso 2: Crea un evento en Calendly para agendar la cita.
         const calendlyResponse = await createCalendlyEvent(appointmentDetails);
         if (calendlyResponse) {
             console.log("Evento de Calendly creado con éxito.");
@@ -179,12 +166,14 @@ async function handleAppointmentFlow(appointmentDetails) {
 // Función para crear un nuevo registro en Airtable.
 async function createAirtableRecord(details) {
     try {
-        const table = airtableBase('Citas'); // 'Citas' es el nombre de la tabla en Airtable.
+        const table = airtableBase('Citas');
+        // Combina fecha y hora en un solo campo para Airtable.
+        const combinedDateTime = `${details.fecha}T${details.hora}:00Z`;
+
         const createdRecord = await table.create({
             "Nombre": details.nombre,
             "Teléfono": details.telefono,
-            "Fecha": details.fecha,
-            "Hora": details.hora
+            "Fecha": combinedDateTime
         });
         return createdRecord;
     } catch (error) {
@@ -200,9 +189,9 @@ async function createCalendlyEvent(details) {
     const CALENDLY_EVENT_TYPE_URI = process.env.CALENDLY_EVENT_TYPE_URI;
 
     try {
-        const inviteeEmail = "ejemplo@ejemplo.com"; // Usa un correo de prueba
+        const inviteeEmail = "ejemplo@ejemplo.com";
         const inviteeName = details.nombre;
-        const startTime = `${details.fecha}T${details.hora}:00Z`; // Combina fecha y hora en formato ISO 8601
+        const startTime = `${details.fecha}T${details.hora}:00Z`;
 
         const payload = {
             invitee_email: inviteeEmail,
