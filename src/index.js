@@ -152,7 +152,7 @@ async function generateGeminiResponse(history) {
 async function handleAppointmentFlow(appointmentDetails) {
     try {
         console.log("Detalles de la cita a procesar:", appointmentDetails);
-        
+
         // 1. Crear el registro en Airtable
         const airtableResponse = await createAirtableRecord(appointmentDetails);
         if (airtableResponse) {
