@@ -119,7 +119,7 @@ async function generateGeminiResponse(history) {
                             try {
                                 const appointmentDetails = JSON.parse(part.text);
                                 console.log("Se ha recibido la señal para agendar la cita y los datos JSON:", appointmentDetails);
-                                // await handleAppointmentFlow(appointmentDetails); // Comentado temporalmente
+                                await handleAppointmentFlow(appointmentDetails); // Ahora la línea está descomentada
                                 return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
                             } catch (e) {
                                 console.log("Respuesta de Gemini recibida exitosamente, en modo conversacional.");
@@ -279,6 +279,7 @@ async function sendTwilioResponse(to, from, body) {
     const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
     const twilioApiUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`;
+
     const payload = new URLSearchParams();
     payload.append('From', from);
     payload.append('To', to);
@@ -303,8 +304,8 @@ async function sendTwilioResponse(to, from, body) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 } else {
-                    console.error("Máximo de reintentos alcanzado para Twilio. Fallando.");
-                    throw error;
+                    console.error("Máximo de reintentos alcanzado para Twilio. Fallando. Se ignorará el error para no detener el flujo de la aplicación.");
+                    return; // No se relanza el error para evitar detener la app completa
                 }
             } else {
                 console.error(`Error enviando mensaje con Twilio: ${error.message}`);
