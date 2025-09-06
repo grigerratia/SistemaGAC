@@ -119,7 +119,7 @@ async function generateGeminiResponse(history) {
                             try {
                                 const appointmentDetails = JSON.parse(part.text);
                                 console.log("Se ha recibido la señal para agendar la cita y los datos JSON:", appointmentDetails);
-                                await handleAppointmentFlow(appointmentDetails);
+                                // await handleAppointmentFlow(appointmentDetails); // Comentado temporalmente
                                 return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
                             } catch (e) {
                                 console.log("Respuesta de Gemini recibida exitosamente, en modo conversacional.");
@@ -200,6 +200,11 @@ async function createCalendlyEvent(details) {
     const start_time = `${details.fecha}T${details.hora}:00Z`;
     const end_time = new Date(new Date(start_time).getTime() + 30 * 60000).toISOString(); // 30 minutos de duración
 
+    // Separar el nombre completo en nombre y apellido(s)
+    const nameParts = details.nombre.trim().split(/\s+/);
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ');
+
     const payload = {
         // Se agrega el URI del usuario, que es obligatorio para la API de Calendly
         user: CALENDLY_USER_URI, 
@@ -207,8 +212,8 @@ async function createCalendlyEvent(details) {
         invitees: [
             {
                 email: 'cliente@example.com', // Usar un email de contacto o solicitarlo
-                first_name: details.nombre.split(' ')[0],
-                last_name: details.nombre.split(' ').slice(1).join(' '),
+                first_name: firstName,
+                last_name: lastName,
                 phone_number: details.telefono
             }
         ],
@@ -230,6 +235,44 @@ async function createCalendlyEvent(details) {
         throw error;
     }
 }
+
+// --- Función para obtener las URIs de Calendly ---
+async function fetchCalendlyURIs() {
+    if (!CALENDLY_ACCESS_TOKEN) {
+        console.error("CALENDLY_ACCESS_TOKEN no está configurado en el archivo .env.");
+        return;
+    }
+
+    try {
+        // Obtener el URI del usuario
+        const userResponse = await axios.get(`${CALENDLY_API_URL}/users/me`, {
+            headers: {
+                'Authorization': `Bearer ${CALENDLY_ACCESS_TOKEN}`
+            }
+        });
+        const userUri = userResponse.data.resource.uri;
+        console.log("¡Éxito! Tu URI de usuario de Calendly es:", userUri);
+        
+        // Obtener el URI del tipo de evento
+        const eventTypesResponse = await axios.get(`${CALENDLY_API_URL}/event_types?user=${userUri}`, {
+            headers: {
+                'Authorization': `Bearer ${CALENDLY_ACCESS_TOKEN}`
+            }
+        });
+        const eventTypeUri = eventTypesResponse.data.collection[0].uri;
+        console.log("¡Éxito! El URI de tu primer tipo de evento es:", eventTypeUri);
+        
+        console.log("\n--- PASO SIGUIENTE ---");
+        console.log("1. Copia las URIs anteriores.");
+        console.log("2. Pégalas en tu archivo .env con las variables 'CALENDLY_USER_URI' y 'CALENDLY_EVENT_TYPE_URI'.");
+        console.log("3. Descomenta la llamada a la función 'handleAppointmentFlow' en la línea ~98 para habilitar el agendamiento de citas.");
+
+    } catch (error) {
+        console.error("Error al obtener las URIs de Calendly. Asegúrate de que el token es correcto y tiene los permisos 'user:read' y 'event_types:read'.");
+        console.error("Detalles del error:", error.response?.data || error.message);
+    }
+}
+
 
 // --- Función para enviar un mensaje usando la API de Twilio ---
 async function sendTwilioResponse(to, from, body) {
@@ -274,4 +317,6 @@ async function sendTwilioResponse(to, from, body) {
 // Inicia el servidor de Express en el puerto configurado.
 app.listen(port, () => {
     console.log(`Servidor escuchando en http://localhost:${port}`);
+    // Llama a la nueva función para obtener las URIs de Calendly
+    fetchCalendlyURIs();
 });
