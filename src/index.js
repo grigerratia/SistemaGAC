@@ -119,7 +119,7 @@ async function generateGeminiResponse(history) {
                             try {
                                 const appointmentDetails = JSON.parse(part.text);
                                 console.log("Se ha recibido la señal para agendar la cita y los datos JSON:", appointmentDetails);
-                                await handleAppointmentFlow(appointmentDetails); // Ahora la línea está descomentada
+                                await handleAppointmentFlow(appointmentDetails);
                                 return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
                             } catch (e) {
                                 console.log("Respuesta de Gemini recibida exitosamente, en modo conversacional.");
@@ -226,7 +226,9 @@ async function createCalendlyEvent(details) {
         const response = await axios.post(`${CALENDLY_API_URL}/scheduled_events`, payload, {
             headers: {
                 'Authorization': `Bearer ${CALENDLY_ACCESS_TOKEN}`,
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                // Agregamos la cabecera necesaria para la función beta
+                'Calendly-Beta-Features': 'scheduled_events'
             }
         });
         return response.data;
