@@ -237,16 +237,33 @@ async function sendTwilioResponse(to, from, body) {
     payload.append('To', to);
     payload.append('Body', body);
 
-    try {
-        const response = await axios.post(twilioApiUrl, payload, {
-            auth: {
-                username: TWILIO_ACCOUNT_SID,
-                password: TWILIO_AUTH_TOKEN
+    const maxRetries = 10;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await axios.post(twilioApiUrl, payload, {
+                auth: {
+                    username: TWILIO_ACCOUNT_SID,
+                    password: TWILIO_AUTH_TOKEN
+                }
+            });
+            // Si tiene éxito, sal del bucle
+            return;
+        } catch (error) {
+            if (error.response && error.response.status === 429) {
+                console.error(`Error 429: Demasiadas solicitudes a Twilio. Reintento ${i + 1} de ${maxRetries}...`);
+                const delay = Math.pow(2, i) * 1000; // Aumenta el tiempo de espera
+                if (i < maxRetries - 1) {
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue;
+                } else {
+                    console.error("Máximo de reintentos alcanzado para Twilio. Fallando.");
+                    throw error;
+                }
+            } else {
+                console.error(`Error enviando mensaje con Twilio: ${error.message}`);
+                throw error;
             }
-        });
-    } catch (error) {
-        console.error(`Error enviando mensaje con Twilio: ${error.message}`);
-        throw error;
+        }
     }
 }
 
