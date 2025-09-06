@@ -19,6 +19,12 @@ const port = process.env.PORT || 3000;
 // extended: false significa que usa la librería 'qs' para el parsing, que es la recomendada.
 app.use(bodyParser.urlencoded({ extended: false }));
 
+// Variable para almacenar el historial de la conversación.
+// Usamos el número de teléfono como clave para identificar a cada usuario.
+// ¡Importante! En un entorno de producción, esto debería almacenarse en una base de datos (como Airtable)
+// para que la memoria persista incluso si el servidor se reinicia.
+const conversationHistory = {};
+
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 // Esta es la ruta que Twilio intentará contactar cuando reciba un mensaje de WhatsApp.
 // Es crucial que esta ruta (/whatsapp-webhook) coincida con la URL de webhook en la configuración de Twilio.
@@ -47,11 +53,28 @@ async function processMessage(body) {
             return;
         }
 
+        // Obtiene o inicializa el historial de conversación para el usuario actual.
+        if (!conversationHistory[fromNumber]) {
+            conversationHistory[fromNumber] = [];
+        }
+
+        // Agrega el nuevo mensaje del usuario al historial.
+        conversationHistory[fromNumber].push({
+            role: "user",
+            parts: [{ text: userMessage }]
+        });
+
         // Llama a la función que se comunica con la API de Gemini para obtener una respuesta.
-        const geminiResponse = await generateGeminiResponse(userMessage);
+        // Le pasamos todo el historial de conversación.
+        const geminiResponse = await generateGeminiResponse(userMessage, conversationHistory[fromNumber]);
 
         // Si la IA generó una respuesta, la envía de vuelta al usuario a través de Twilio.
         if (geminiResponse) {
+            // Agrega la respuesta del asistente al historial.
+            conversationHistory[fromNumber].push({
+                role: "model",
+                parts: [{ text: geminiResponse }]
+            });
             await sendTwilioResponse(fromNumber, toNumber, geminiResponse);
         }
 
@@ -64,8 +87,8 @@ async function processMessage(body) {
 }
 
 // --- Función para llamar a la API de Gemini ---
-// Se encarga de construir la solicitud y enviar el mensaje del usuario a la IA.
-async function generateGeminiResponse(userMessage) {
+// Se encarga de construir la solicitud y enviar el historial de la conversación a la IA.
+async function generateGeminiResponse(userMessage, history) {
     // Obtiene la clave de la API de las variables de entorno.
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     // Usamos el modelo más actualizado y gratuito para una mayor resiliencia.
@@ -75,16 +98,16 @@ async function generateGeminiResponse(userMessage) {
     const systemInstructions = "Eres un asistente de citas para un consultorio oftalmológico. Mantén un tono profesional, amable y conciso. Tu única función es agendar citas. No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. En esos casos, pide amablemente que el cliente se comunique directamente con el consultorio.";
 
     // El 'payload' es el objeto JSON que se envía a la API de Gemini.
+    // Ahora, en lugar de solo el mensaje del usuario, enviamos el historial completo de la conversación.
     const payload = {
-        contents: [
-            { parts: [{ text: userMessage }] }
-        ],
+        contents: history,
         systemInstruction: {
             parts: [{ text: systemInstructions }]
         },
         generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 200,
+            // Aumentamos los tokens máximos para evitar que los mensajes se corten.
+            maxOutputTokens: 400,
         },
     };
 
