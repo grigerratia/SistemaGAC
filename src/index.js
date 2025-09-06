@@ -24,6 +24,8 @@ const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base
 const CALENDLY_API_URL = 'https://api.calendly.com';
 const CALENDLY_ACCESS_TOKEN = process.env.CALENDLY_PERSONAL_ACCESS_TOKEN;
 const CALENDLY_EVENT_TYPE_URI = process.env.CALENDLY_EVENT_TYPE_URI;
+// Agrega la nueva variable de entorno para el URI del usuario
+const CALENDLY_USER_URI = process.env.CALENDLY_USER_URI;
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 app.post('/whatsapp-webhook', (req, res) => {
@@ -190,8 +192,8 @@ async function createAirtableRecord(details) {
 
 // Función para crear un evento en Calendly.
 async function createCalendlyEvent(details) {
-    if (!CALENDLY_ACCESS_TOKEN || !CALENDLY_EVENT_TYPE_URI) {
-        throw new Error("Tokens de Calendly no configurados en .env");
+    if (!CALENDLY_ACCESS_TOKEN || !CALENDLY_EVENT_TYPE_URI || !CALENDLY_USER_URI) {
+        throw new Error("Tokens de Calendly o URI de usuario no configurados en .env");
     }
 
     // Convierte la fecha y hora a un formato ISO 8601 con zona horaria.
@@ -199,6 +201,8 @@ async function createCalendlyEvent(details) {
     const end_time = new Date(new Date(start_time).getTime() + 30 * 60000).toISOString(); // 30 minutos de duración
 
     const payload = {
+        // Se agrega el URI del usuario, que es obligatorio para la API de Calendly
+        user: CALENDLY_USER_URI, 
         event_type: CALENDLY_EVENT_TYPE_URI,
         invitees: [
             {
