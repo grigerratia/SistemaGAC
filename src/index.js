@@ -3,6 +3,10 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const path = require('path');
+const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const cron = require('node-cron');
+const moment = require('moment');
 require('dotenv').config();
 
 // Se importa la librería de Airtable.
@@ -19,13 +23,6 @@ const conversationHistory = {};
 
 // Configura Airtable con las variables de entorno.
 const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base(process.env.AIRTABLE_BASE_ID);
-
-// Configura las credenciales de Calendly
-const CALENDLY_API_URL = 'https://api.calendly.com';
-const CALENDLY_ACCESS_TOKEN = process.env.CALENDLY_PERSONAL_ACCESS_TOKEN;
-const CALENDLY_EVENT_TYPE_URI = process.env.CALENDLY_EVENT_TYPE_URI;
-// Agrega la nueva variable de entorno para el URI del usuario
-const CALENDLY_USER_URI = process.env.CALENDLY_USER_URI;
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 app.post('/whatsapp-webhook', (req, res) => {
@@ -154,16 +151,8 @@ async function generateGeminiResponse(history) {
 async function handleAppointmentFlow(appointmentDetails) {
     try {
         console.log("Detalles de la cita a procesar:", appointmentDetails);
-
-        // 1. Crear el registro en Airtable
-        const airtableResponse = await createAirtableRecord(appointmentDetails);
-        if (airtableResponse) {
-            console.log("Registro en Airtable creado con éxito.");
-        }
-
-        // 2. Crear el evento en Calendly
-        await createCalendlyEvent(appointmentDetails);
-        console.log("Evento en Calendly creado con éxito.");
+        await createAirtableRecord(appointmentDetails);
+        console.log("Registro en Airtable creado con éxito.");
 
     } catch (error) {
         console.error("Error en el flujo de agendamiento:", error);
@@ -175,13 +164,10 @@ async function handleAppointmentFlow(appointmentDetails) {
 async function createAirtableRecord(details) {
     try {
         const table = airtableBase('Citas');
-        // Combina fecha y hora en un solo campo para Airtable.
-        const combinedDateTime = `${details.fecha}T${details.hora}:00Z`;
-
         const createdRecord = await table.create({
             "Nombre": details.nombre,
             "Teléfono": details.telefono,
-            "Fecha": combinedDateTime
+            "Fecha": `${details.fecha}T${details.hora}:00`
         });
         return createdRecord;
     } catch (error) {
@@ -190,91 +176,102 @@ async function createAirtableRecord(details) {
     }
 }
 
-// Función para crear un evento en Calendly.
-async function createCalendlyEvent(details) {
-    if (!CALENDLY_ACCESS_TOKEN || !CALENDLY_EVENT_TYPE_URI || !CALENDLY_USER_URI) {
-        throw new Error("Tokens de Calendly o URI de usuario no configurados en .env");
-    }
-
-    // Convierte la fecha y hora a un formato ISO 8601 con zona horaria.
-    const start_time = `${details.fecha}T${details.hora}:00Z`;
-    const end_time = new Date(new Date(start_time).getTime() + 30 * 60000).toISOString(); // 30 minutos de duración
-
-    // Separar el nombre completo en nombre y apellido(s)
-    const nameParts = details.nombre.trim().split(/\s+/);
-    const firstName = nameParts[0];
-    const lastName = nameParts.slice(1).join(' ');
-
-    const payload = {
-        // Se agrega el URI del usuario, que es obligatorio para la API de Calendly
-        user: CALENDLY_USER_URI, 
-        event_type: CALENDLY_EVENT_TYPE_URI,
-        invitees: [
-            {
-                email: 'cliente@example.com', // Usar un email de contacto o solicitarlo
-                first_name: firstName,
-                last_name: lastName,
-                phone_number: details.telefono
-            }
-        ],
-        start_time: start_time,
-        end_time: end_time,
-        location: 'El consultorio', // Puedes personalizar este valor
-    };
-
+// --- Nueva funcionalidad: Generación de PDF de calendario ---
+app.get('/generate-pdf', async (req, res) => {
     try {
-        const response = await axios.post(`${CALENDLY_API_URL}/scheduled_events`, payload, {
-            headers: {
-                'Authorization': `Bearer ${CALENDLY_ACCESS_TOKEN}`,
-                'Content-Type': 'application/json',
-                // Agregamos la cabecera necesaria para la función beta
-                'Calendly-Beta-Features': 'scheduled_events'
-            }
-        });
-        return response.data;
-    } catch (error) {
-        console.error("Error creando evento en Calendly:", error.response?.data || error.message);
-        throw error;
-    }
-}
+        const doc = new PDFDocument();
+        const year = req.query.year || moment().year();
+        const month = req.query.month ? parseInt(req.query.month) - 1 : moment().month(); // Los meses son 0-11
+        const startOfMonth = moment().year(year).month(month).startOf('month');
+        const endOfMonth = moment().year(year).month(month).endOf('month');
 
-// --- Función para obtener las URIs de Calendly ---
-async function fetchCalendlyURIs() {
-    if (!CALENDLY_ACCESS_TOKEN) {
-        console.error("CALENDLY_ACCESS_TOKEN no está configurado en el archivo .env.");
-        return;
-    }
+        // Headers
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="calendario_${startOfMonth.format('MMMM_YYYY')}.pdf"`);
 
-    try {
-        // Obtener el URI del usuario
-        const userResponse = await axios.get(`${CALENDLY_API_URL}/users/me`, {
-            headers: {
-                'Authorization': `Bearer ${CALENDLY_ACCESS_TOKEN}`
-            }
+        doc.pipe(res);
+
+        // Título del documento
+        doc.fontSize(25).text(`Calendario de Citas`, { align: 'center' });
+        doc.fontSize(20).text(`${startOfMonth.format('MMMM YYYY')}`, { align: 'center' });
+        doc.moveDown();
+
+        const tableTop = doc.y;
+        const colWidth = 75;
+        const rowHeight = 70;
+        const left = 50;
+
+        const headers = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+        doc.font('Helvetica-Bold');
+        headers.forEach((header, i) => {
+            doc.text(header, left + i * colWidth, tableTop, { width: colWidth, align: 'center' });
         });
-        const userUri = userResponse.data.resource.uri;
-        console.log("¡Éxito! Tu URI de usuario de Calendly es:", userUri);
-        
-        // Obtener el URI del tipo de evento
-        const eventTypesResponse = await axios.get(`${CALENDLY_API_URL}/event_types?user=${userUri}`, {
-            headers: {
-                'Authorization': `Bearer ${CALENDLY_ACCESS_TOKEN}`
+        doc.font('Helvetica');
+        doc.rect(left, tableTop + 20, colWidth * 7, 1).fill('#000');
+
+        // Obtener citas de Airtable
+        const records = await airtableBase('Citas').select({
+            view: "Grid view",
+            filterByFormula: `AND(IS_AFTER({Fecha}, '${startOfMonth.format('YYYY-MM-DD')}'), IS_BEFORE({Fecha}, '${endOfMonth.format('YYYY-MM-DD')}'))`
+        }).all();
+
+        let currentDay = startOfMonth.clone();
+        let currentRow = 0;
+        while (currentDay.isSameOrBefore(endOfMonth, 'day')) {
+            const dayOfWeek = currentDay.weekday();
+            const x = left + dayOfWeek * colWidth;
+            const y = tableTop + 25 + currentRow * rowHeight;
+            doc.text(currentDay.format('DD'), x + 5, y + 5);
+
+            const citasDelDia = records.filter(record => moment(record.fields.Fecha).isSame(currentDay, 'day'));
+            let textY = y + 20;
+            citasDelDia.forEach(cita => {
+                doc.fontSize(8).text(`${moment(cita.fields.Fecha).format('HH:mm')} - ${cita.fields.Nombre}`, x + 5, textY, { width: colWidth - 5, lineGap: 0 });
+                textY += 10;
+            });
+            
+            // Dibuja la celda del calendario
+            doc.rect(x, y, colWidth, rowHeight).stroke('#ccc');
+
+            if (dayOfWeek === 6) {
+                currentRow++;
             }
-        });
-        const eventTypeUri = eventTypesResponse.data.collection[0].uri;
-        console.log("¡Éxito! El URI de tu primer tipo de evento es:", eventTypeUri);
-        
-        console.log("\n--- PASO SIGUIENTE ---");
-        console.log("1. Copia las URIs anteriores.");
-        console.log("2. Pégalas en tu archivo .env con las variables 'CALENDLY_USER_URI' y 'CALENDLY_EVENT_TYPE_URI'.");
-        console.log("3. Descomenta la llamada a la función 'handleAppointmentFlow' en la línea ~98 para habilitar el agendamiento de citas.");
+            currentDay.add(1, 'day');
+        }
+
+        doc.end();
 
     } catch (error) {
-        console.error("Error al obtener las URIs de Calendly. Asegúrate de que el token es correcto y tiene los permisos 'user:read' y 'event_types:read'.");
-        console.error("Detalles del error:", error.response?.data || error.message);
+        console.error("Error generando PDF:", error);
+        res.status(500).send("Error generando el archivo PDF.");
     }
-}
+});
 
+// --- Nueva funcionalidad: Programación de recordatorios ---
+cron.schedule('0 9 * * *', async () => { // Se ejecuta todos los días a las 9:00 AM
+    console.log('Verificando citas para enviar recordatorios...');
+    const tomorrow = moment().add(1, 'day').format('YYYY-MM-DD');
+    
+    try {
+        const records = await airtableBase('Citas').select({
+            view: "Grid view",
+            filterByFormula: `DATETIME_FORMAT({Fecha}, 'YYYY-MM-DD') = '${tomorrow}'`
+        }).all();
+        
+        for (const record of records) {
+            const phoneNumber = record.fields.Teléfono;
+            const appointmentDate = moment(record.fields.Fecha).format('LL');
+            const appointmentTime = moment(record.fields.Fecha).format('h:mm A');
+            const message = `Recordatorio: Tienes una cita con ${record.fields.Nombre} mañana, ${appointmentDate} a las ${appointmentTime}. ¡Te esperamos!`;
+            
+            await sendTwilioResponse(phoneNumber, process.env.TWILIO_PHONE_NUMBER, message);
+            console.log(`Recordatorio enviado a ${phoneNumber}`);
+        }
+        
+    } catch (error) {
+        console.error("Error al enviar recordatorios:", error);
+    }
+});
 
 // --- Función para enviar un mensaje usando la API de Twilio ---
 async function sendTwilioResponse(to, from, body) {
@@ -296,18 +293,17 @@ async function sendTwilioResponse(to, from, body) {
                     password: TWILIO_AUTH_TOKEN
                 }
             });
-            // Si tiene éxito, sal del bucle
             return;
         } catch (error) {
             if (error.response && error.response.status === 429) {
                 console.error(`Error 429: Demasiadas solicitudes a Twilio. Reintento ${i + 1} de ${maxRetries}...`);
-                const delay = Math.pow(2, i) * 1000; // Aumenta el tiempo de espera
+                const delay = Math.pow(2, i) * 1000;
                 if (i < maxRetries - 1) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 } else {
                     console.error("Máximo de reintentos alcanzado para Twilio. Fallando. Se ignorará el error para no detener el flujo de la aplicación.");
-                    return; // No se relanza el error para evitar detener la app completa
+                    return;
                 }
             } else {
                 console.error(`Error enviando mensaje con Twilio: ${error.message}`);
@@ -320,6 +316,5 @@ async function sendTwilioResponse(to, from, body) {
 // Inicia el servidor de Express en el puerto configurado.
 app.listen(port, () => {
     console.log(`Servidor escuchando en http://localhost:${port}`);
-    // Llama a la nueva función para obtener las URIs de Calendly
-    fetchCalendlyURIs();
+    console.log(`Para generar el PDF, ve a http://localhost:${port}/generate-pdf?year=2025&month=10`);
 });
