@@ -151,11 +151,39 @@ async function generateGeminiResponse(history) {
 async function handleAppointmentFlow(appointmentDetails) {
     try {
         console.log("Detalles de la cita a procesar:", appointmentDetails);
-        await createAirtableRecord(appointmentDetails);
-        console.log("Registro en Airtable creado con éxito.");
+        const existingRecord = await findRecordByPhoneNumber(appointmentDetails.telefono);
+
+        if (existingRecord) {
+            console.log("Ya existe un registro. Actualizando cita...");
+            await updateAirtableRecord(existingRecord.id, appointmentDetails);
+            console.log("Registro en Airtable actualizado con éxito.");
+        } else {
+            console.log("No existe un registro. Creando nueva cita...");
+            await createAirtableRecord(appointmentDetails);
+            console.log("Nuevo registro en Airtable creado con éxito.");
+        }
+        
+        // Genera el PDF después de guardar/actualizar la cita
+        await createCalendarPDF(appointmentDetails.fecha);
+        console.log("PDF del calendario generado con éxito.");
 
     } catch (error) {
         console.error("Error en el flujo de agendamiento:", error);
+        throw error;
+    }
+}
+
+// Función para encontrar un registro por número de teléfono
+async function findRecordByPhoneNumber(phoneNumber) {
+    try {
+        const table = airtableBase('Citas');
+        const records = await table.select({
+            view: "Grid view",
+            filterByFormula: `{Teléfono} = '${phoneNumber}'`
+        }).firstPage();
+        return records[0] || null;
+    } catch (error) {
+        console.error("Error buscando registro en Airtable:", error);
         throw error;
     }
 }
@@ -176,20 +204,30 @@ async function createAirtableRecord(details) {
     }
 }
 
+// Función para actualizar un registro existente en Airtable.
+async function updateAirtableRecord(recordId, details) {
+    try {
+        const table = airtableBase('Citas');
+        const updatedRecord = await table.update(recordId, {
+            "Nombre": details.nombre,
+            "Fecha": `${details.fecha}T${details.hora}:00`
+        });
+        return updatedRecord;
+    } catch (error) {
+        console.error("Error actualizando registro en Airtable:", error);
+        throw error;
+    }
+}
+
 // --- Nueva funcionalidad: Generación de PDF de calendario ---
-app.get('/generate-pdf', async (req, res) => {
+async function createCalendarPDF(date) {
     try {
         console.log('Iniciando la generación del PDF...');
         const doc = new PDFDocument();
-        const year = req.query.year || moment().year();
-        const month = req.query.month ? parseInt(req.query.month) - 1 : moment().month(); // Los meses son 0-11
-        const startOfMonth = moment().year(year).month(month).startOf('month');
-        
-        // Headers
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="calendario_${startOfMonth.format('MMMM_YYYY')}.pdf"`);
+        const startOfMonth = moment(date).startOf('month');
+        const fileName = `calendario_citas_${startOfMonth.format('YYYY-MM')}.pdf`;
 
-        doc.pipe(res);
+        doc.pipe(fs.createWriteStream(path.join(__dirname, fileName)));
 
         // Título del documento
         doc.fontSize(25).text(`Calendario de Citas`, { align: 'center' });
@@ -209,7 +247,6 @@ app.get('/generate-pdf', async (req, res) => {
         doc.font('Helvetica');
         doc.rect(left, tableTop + 20, colWidth * 7, 1).fill('#000');
         
-        // Obteniendo las citas de Airtable de forma más robusta
         const filterMonth = startOfMonth.format('YYYY-MM');
         console.log(`Buscando citas para el mes: ${filterMonth}`);
         const records = await airtableBase('Citas').select({
@@ -253,9 +290,8 @@ app.get('/generate-pdf', async (req, res) => {
 
     } catch (error) {
         console.error("Error generando PDF:", error.message);
-        res.status(500).send("Hubo un problema al generar el archivo PDF. Revisa la consola del servidor para más detalles.");
     }
-});
+}
 
 // --- Nueva funcionalidad: Programación de recordatorios ---
 cron.schedule('0 9 * * *', async () => { // Se ejecuta todos los días a las 9:00 AM
@@ -326,5 +362,5 @@ async function sendTwilioResponse(to, from, body) {
 // Inicia el servidor de Express en el puerto configurado.
 app.listen(port, () => {
     console.log(`Servidor escuchando en http://localhost:${port}`);
-    console.log(`Para generar el PDF, ve a http://localhost:${port}/generate-pdf?year=2025&month=09`);
+    console.log(`Ahora el PDF se generará automáticamente.`);
 });
