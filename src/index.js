@@ -30,6 +30,34 @@ app.post('/whatsapp-webhook', (req, res) => {
     processMessage(req.body);
 });
 
+// --- NUEVO ENDPOINT PARA DESCARGAR EL PDF ---
+app.get('/descargar-pdf', async (req, res) => {
+    try {
+        const fileName = `calendario_citas_${moment().format('YYYY-MM')}.pdf`;
+        const filePath = path.join(__dirname, fileName);
+
+        // Verifica si el archivo existe
+        if (fs.existsSync(filePath)) {
+            console.log(`El archivo ${fileName} existe, procediendo a descargarlo.`);
+            res.download(filePath, (err) => {
+                if (err) {
+                    console.error("Error al enviar el archivo:", err);
+                    res.status(500).send("Error al descargar el archivo.");
+                } else {
+                    console.log("Archivo enviado con éxito.");
+                }
+            });
+        } else {
+            console.log(`El archivo ${fileName} no se encontró en el servidor.`);
+            res.status(404).send("El calendario no está disponible. Por favor, asegúrese de que se haya agendado una cita este mes.");
+        }
+    } catch (error) {
+        console.error("Error en el endpoint de descarga:", error);
+        res.status(500).send("Ocurrió un error al intentar descargar el archivo.");
+    }
+});
+
+
 // --- Función que procesa el mensaje en segundo plano ---
 async function processMessage(body) {
     try {
@@ -93,7 +121,7 @@ async function generateGeminiResponse(history) {
                 },
                 required: ["nombre", "telefono", "fecha", "hora"]
             }
-        },
+        }
     };
 
     const url = `${GEMINI_API_URL}?key=${GEMINI_API_KEY}`;
@@ -230,8 +258,9 @@ async function createCalendarPDF(date) {
         const doc = new PDFDocument();
         const startOfMonth = moment(date).startOf('month');
         const fileName = `calendario_citas_${startOfMonth.format('YYYY-MM')}.pdf`;
+        const filePath = path.join(__dirname, fileName);
 
-        doc.pipe(fs.createWriteStream(path.join(__dirname, fileName)));
+        doc.pipe(fs.createWriteStream(filePath));
 
         // Título del documento
         doc.fontSize(25).text(`Calendario de Citas`, { align: 'center' });
