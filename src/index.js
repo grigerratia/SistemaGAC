@@ -77,11 +77,13 @@ async function generateGeminiResponse(history) {
     
     Si el cliente menciona que quiere pagar por adelantado, pídele el código de referencia de la transferencia o pago móvil.
     
-    Cuando tengas el nombre completo, número de teléfono, fecha, hora y el tipo de cita, debes devolver un objeto JSON con los siguientes campos: 'nombre', 'telefono', 'fecha', 'hora', 'tipoCita' y opcionalmente 'referenciaPago'.
+    Para agendar una cita, necesitas el nombre completo, número de teléfono, fecha, hora y el tipo de cita.
+    
+    Solo devuelve un objeto JSON si tienes todos los datos necesarios para agendar la cita (nombre, teléfono, fecha y hora). El JSON debe tener los siguientes campos: 'nombre', 'telefono', 'fecha', 'hora', 'tipoCita' y opcionalmente 'referenciaPago'. No incluyas ningún otro texto o puntuación antes o después del JSON.
     
     Si el cliente envía una referencia de pago en un mensaje posterior a haber agendado su cita, debes responder preguntando nuevamente su nombre para buscar el registro y confirmarlo. Luego, cuando el cliente envíe su nombre junto a la referencia de pago, debes devolver un objeto JSON con los campos 'nombre', 'telefono' y 'referenciaPago', dejando los demás campos vacíos. Esto servirá para actualizar el registro del cliente en la base de datos.
     
-    No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. No incluyas ningún otro texto o puntuación antes o después del JSON.`;
+    No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar.`;
 
     const payload = {
         contents: history,
@@ -91,19 +93,7 @@ async function generateGeminiResponse(history) {
         generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 400,
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "OBJECT",
-                properties: {
-                    nombre: { "type": "STRING" },
-                    telefono: { "type": "STRING" },
-                    fecha: { "type": "STRING" },
-                    hora: { "type": "STRING" },
-                    tipoCita: { "type": "STRING", "enum": ["Consultorio", "Domicilio"] },
-                    referenciaPago: { "type": "STRING" }
-                },
-                required: ["nombre"]
-            }
+            responseMimeType: "text/plain" // Cambiamos a 'text/plain' para permitir respuestas conversacionales.
         }
     };
 
