@@ -30,14 +30,17 @@ app.post('/whatsapp-webhook', (req, res) => {
 // --- Función que procesa el mensaje en segundo plano ---
 async function processMessage(body) {
     try {
-        const userMessage = body.Body;
         const fromNumber = body.From;
         const toNumber = body.To;
+        let userMessage = body.Body;
 
         if (!userMessage) {
             console.log("Mensaje vacío recibido, ignorando.");
             return;
         }
+
+        // 1. Procesa la fecha relativa antes de pasársela a Gemini.
+        userMessage = parseRelativeDate(userMessage);
 
         if (!conversationHistory[fromNumber]) {
             conversationHistory[fromNumber] = [];
@@ -64,6 +67,59 @@ async function processMessage(body) {
     }
 }
 
+// --- Función para traducir fechas relativas a un formato concreto ---
+function parseRelativeDate(message) {
+    const today = moment();
+    const tomorrow = moment().add(1, 'day');
+
+    const dayOfWeekRegex = /(lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)/i;
+    const tomorrowRegex = /(mañana|manana|pasado mañana|pasado manana)/i;
+    const nextWeekRegex = /semana que viene|próxima semana|proxima semana/i;
+
+    let parsedDate = null;
+    let originalDay = null;
+
+    if (tomorrowRegex.test(message)) {
+        parsedDate = tomorrow.format('YYYY-MM-DD');
+    } else {
+        const dayMatch = message.match(dayOfWeekRegex);
+        if (dayMatch) {
+            originalDay = dayMatch[1].toLowerCase();
+            const daysInSpanish = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
+            let dayIndex = daysInSpanish.indexOf(originalDay);
+
+            if (dayIndex === -1) {
+                // Manejar tildes y sin tildes
+                const normalizedDay = originalDay.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                dayIndex = daysInSpanish.indexOf(normalizedDay);
+            }
+
+            const currentDayIndex = today.day();
+            let daysToAdd = dayIndex - currentDayIndex;
+
+            if (daysToAdd <= 0 || nextWeekRegex.test(message)) {
+                daysToAdd += 7;
+            }
+
+            parsedDate = today.add(daysToAdd, 'days').format('YYYY-MM-DD');
+        }
+    }
+
+    if (parsedDate) {
+        // Reemplaza la fecha relativa en el mensaje con la fecha formateada.
+        let newMessage = message;
+        if (originalDay) {
+            newMessage = newMessage.replace(new RegExp(originalDay, 'i'), parsedDate);
+        } else {
+            newMessage = newMessage.replace(tomorrowRegex, parsedDate);
+        }
+        return newMessage;
+    }
+
+    return message;
+}
+
+
 // --- Función principal para llamar a la API de Gemini ---
 async function generateGeminiResponse(history) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -77,9 +133,9 @@ async function generateGeminiResponse(history) {
     
     Si el cliente menciona que quiere pagar por adelantado, pídele el código de referencia de la transferencia o pago móvil.
     
-    Para agendar una cita, necesitas el nombre completo, número de teléfono, fecha, hora y el tipo de cita.
+    Para agendar una cita, necesitas el nombre completo, número de teléfono, fecha, y hora.
     
-    Solo devuelve un objeto JSON si tienes todos los datos necesarios para agendar la cita (nombre, teléfono, fecha y hora). El JSON debe tener los siguientes campos: 'nombre', 'telefono', 'fecha', 'hora', 'tipoCita' y opcionalmente 'referenciaPago'. No incluyas ningún otro texto o puntuación antes o después del JSON.
+    **ATENCIÓN**: Solo debes responder con un objeto JSON si la conversación te ha proporcionado **todos** los siguientes datos: 'nombre', 'telefono', 'fecha' y 'hora'. La fecha debe estar en formato YYYY-MM-DD. Si falta alguno de estos datos, **NO** generes el JSON y continúa la conversación de forma natural para solicitarlos. No incluyas ningún otro texto o puntuación antes o después del JSON.
     
     Si el cliente envía una referencia de pago en un mensaje posterior a haber agendado su cita, debes responder preguntando nuevamente su nombre para buscar el registro y confirmarlo. Luego, cuando el cliente envíe su nombre junto a la referencia de pago, debes devolver un objeto JSON con los campos 'nombre', 'telefono' y 'referenciaPago', dejando los demás campos vacíos. Esto servirá para actualizar el registro del cliente en la base de datos.
     
@@ -93,7 +149,7 @@ async function generateGeminiResponse(history) {
         generationConfig: {
             temperature: 0.7,
             maxOutputTokens: 400,
-            responseMimeType: "text/plain" // Cambiamos a 'text/plain' para permitir respuestas conversacionales.
+            responseMimeType: "text/plain"
         }
     };
 
