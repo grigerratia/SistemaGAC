@@ -3,6 +3,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const moment = require('moment');
+const cron = require('node-cron');
 require('dotenv').config();
 
 // Se importa la librería de Airtable.
