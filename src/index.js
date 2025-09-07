@@ -70,50 +70,45 @@ async function processMessage(body) {
 // --- Función para traducir fechas relativas a un formato concreto ---
 function parseRelativeDate(message) {
     const today = moment();
-    const tomorrow = moment().add(1, 'day');
+    let dateToParse = null;
 
-    const dayOfWeekRegex = /(lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)/i;
     const tomorrowRegex = /(mañana|manana|pasado mañana|pasado manana)/i;
-    const nextWeekRegex = /semana que viene|próxima semana|proxima semana/i;
+    const dayOfWeekRegex = /(lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado|domingo)/i;
+    const nextWeekRegex = /(semana que viene|próxima semana|proxima semana)/i;
 
-    let parsedDate = null;
-    let originalDay = null;
+    // Convertir el mensaje a minúsculas y normalizar para buscar días sin tildes
+    const normalizedMessage = message.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-    if (tomorrowRegex.test(message)) {
-        parsedDate = tomorrow.format('YYYY-MM-DD');
+    if (tomorrowRegex.test(normalizedMessage)) {
+        dateToParse = moment().add(1, 'day');
     } else {
-        const dayMatch = message.match(dayOfWeekRegex);
+        const dayMatch = dayOfWeekRegex.exec(normalizedMessage);
         if (dayMatch) {
-            originalDay = dayMatch[1].toLowerCase();
-            const daysInSpanish = ["domingo", "lunes", "martes", "miércoles", "miercoles", "jueves", "viernes", "sábado", "sabado"];
-            let dayIndex = daysInSpanish.indexOf(originalDay);
+            const dayOfWeek = dayMatch[1];
+            
+            // Encuentra el día de la semana correcto
+            const daysMap = {
+                "lunes": 1, "martes": 2, "miercoles": 3, "jueves": 4, "viernes": 5, "sabado": 6, "domingo": 0,
+                "miércoles": 3, "sábado": 6
+            };
+            let targetDay = daysMap[dayOfWeek];
+            
+            // Crea una fecha para el día de la semana solicitado
+            dateToParse = moment().day(targetDay);
 
-            if (dayIndex === -1) {
-                // Manejar tildes y sin tildes
-                const normalizedDay = originalDay.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-                dayIndex = daysInSpanish.indexOf(normalizedDay);
+            // Si el día ya pasó esta semana y no se menciona "semana que viene",
+            // lo movemos a la siguiente semana
+            if (dateToParse.isBefore(today, 'day') || nextWeekRegex.test(normalizedMessage)) {
+                dateToParse.add(7, 'days');
             }
-
-            const currentDayIndex = today.day();
-            let daysToAdd = dayIndex - currentDayIndex;
-
-            if (daysToAdd <= 0 || nextWeekRegex.test(message)) {
-                daysToAdd += 7;
-            }
-
-            parsedDate = today.add(daysToAdd, 'days').format('YYYY-MM-DD');
         }
     }
 
-    if (parsedDate) {
+    if (dateToParse) {
+        const formattedDate = dateToParse.format('YYYY-MM-DD');
+        console.log(`Fecha relativa parseada: ${message} -> ${formattedDate}`);
         // Reemplaza la fecha relativa en el mensaje con la fecha formateada.
-        let newMessage = message;
-        if (originalDay) {
-            newMessage = newMessage.replace(new RegExp(originalDay, 'i'), parsedDate);
-        } else {
-            newMessage = newMessage.replace(tomorrowRegex, parsedDate);
-        }
-        return newMessage;
+        return message.replace(tomorrowRegex, formattedDate).replace(dayOfWeekRegex, formattedDate).replace(nextWeekRegex, '');
     }
 
     return message;
