@@ -200,6 +200,19 @@ async function generateGeminiResponse(history) {
     return null;
 }
 
+// --- Función que formatea los datos para Airtable ---
+function formatAppointmentForAirtable(appointmentDetails, existingRecordId = null) {
+    const airtableRecord = {
+        "Nombre": appointmentDetails.nombre,
+        "Teléfono": appointmentDetails.telefono,
+        // Combina fecha y hora en el formato correcto para Airtable
+        "Fecha": `${appointmentDetails.fecha}T${appointmentDetails.hora}:00`,
+        "Tipo de Cita": appointmentDetails.tipoCita,
+        "Referencia": appointmentDetails.referenciaPago || ""
+    };
+    return airtableRecord;
+}
+
 // --- Funciones para la Gestión de la Cita ---
 async function handleAppointmentFlow(appointmentDetails) {
     try {
@@ -209,6 +222,7 @@ async function handleAppointmentFlow(appointmentDetails) {
         if (appointmentDetails.referenciaPago && appointmentDetails.nombre) {
             const record = await findRecordByName(appointmentDetails.nombre);
             if (record) {
+                console.log("Actualizando referencia de pago en Airtable...");
                 await updateAirtableRecord(record.id, { "Referencia": appointmentDetails.referenciaPago });
                 console.log("Campo de Referencia en Airtable actualizado con éxito.");
             } else {
@@ -217,20 +231,17 @@ async function handleAppointmentFlow(appointmentDetails) {
         } else if (appointmentDetails.nombre && appointmentDetails.telefono && appointmentDetails.fecha && appointmentDetails.hora) {
             // Si tiene todos los datos, es una nueva cita o una actualización completa
             const existingRecord = await findRecordByPhoneNumber(appointmentDetails.telefono);
-            const airtableRecord = {
-                "Nombre": appointmentDetails.nombre,
-                "Teléfono": appointmentDetails.telefono,
-                "Fecha": `${appointmentDetails.fecha}T${appointmentDetails.hora}:00`,
-                "Tipo de Cita": appointmentDetails.tipoCita,
-                "Referencia": appointmentDetails.referenciaPago || ""
-            };
 
             if (existingRecord) {
                 console.log("Ya existe un registro. Actualizando cita...");
+                const airtableRecord = formatAppointmentForAirtable(appointmentDetails);
+                console.log("Objeto para Airtable:", airtableRecord);
                 await updateAirtableRecord(existingRecord.id, airtableRecord);
                 console.log("Registro en Airtable actualizado con éxito.");
             } else {
                 console.log("No existe un registro. Creando nueva cita...");
+                const airtableRecord = formatAppointmentForAirtable(appointmentDetails);
+                console.log("Objeto para Airtable:", airtableRecord);
                 await createAirtableRecord(airtableRecord);
                 console.log("Nuevo registro en Airtable creado con éxito.");
             }
@@ -239,7 +250,7 @@ async function handleAppointmentFlow(appointmentDetails) {
         }
         
     } catch (error) {
-        console.error("Error en el flujo de agendamiento:", error);
+        console.error("Error en el flujo de agendamiento:", error.message);
         throw error;
     }
 }
@@ -254,7 +265,7 @@ async function findRecordByPhoneNumber(phoneNumber) {
         }).firstPage();
         return records[0] || null;
     } catch (error) {
-        console.error("Error buscando registro en Airtable por teléfono:", error);
+        console.error("Error buscando registro en Airtable por teléfono:", error.message);
         throw error;
     }
 }
@@ -269,7 +280,7 @@ async function findRecordByName(name) {
         }).firstPage();
         return records[0] || null;
     } catch (error) {
-        console.error("Error buscando registro en Airtable por nombre:", error);
+        console.error("Error buscando registro en Airtable por nombre:", error.message);
         throw error;
     }
 }
@@ -281,7 +292,7 @@ async function createAirtableRecord(details) {
         const createdRecord = await table.create(details);
         return createdRecord;
     } catch (error) {
-        console.error("Error creando registro en Airtable:", error);
+        console.error("Error creando registro en Airtable:", error.message);
         throw error;
     }
 }
@@ -293,7 +304,7 @@ async function updateAirtableRecord(recordId, details) {
         const updatedRecord = await table.update(recordId, details);
         return updatedRecord;
     } catch (error) {
-        console.error("Error actualizando registro en Airtable:", error);
+        console.error("Error actualizando registro en Airtable:", error.message);
         throw error;
     }
 }
