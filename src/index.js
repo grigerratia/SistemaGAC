@@ -2,10 +2,6 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
-const path = require('path');
-const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const cron = require('node-cron');
 const moment = require('moment');
 require('dotenv').config();
 
@@ -29,34 +25,6 @@ app.post('/whatsapp-webhook', (req, res) => {
     res.send('OK');
     processMessage(req.body);
 });
-
-// --- NUEVO ENDPOINT PARA DESCARGAR EL PDF ---
-app.get('/descargar-pdf', async (req, res) => {
-    try {
-        const fileName = `calendario_citas_${moment().format('YYYY-MM')}.pdf`;
-        const filePath = path.join(__dirname, fileName);
-
-        // Verifica si el archivo existe
-        if (fs.existsSync(filePath)) {
-            console.log(`El archivo ${fileName} existe, procediendo a descargarlo.`);
-            res.download(filePath, (err) => {
-                if (err) {
-                    console.error("Error al enviar el archivo:", err);
-                    res.status(500).send("Error al descargar el archivo.");
-                } else {
-                    console.log("Archivo enviado con éxito.");
-                }
-            });
-        } else {
-            console.log(`El archivo ${fileName} no se encontró en el servidor.`);
-            res.status(404).send("El calendario no está disponible. Por favor, asegúrese de que se haya agendado una cita este mes.");
-        }
-    } catch (error) {
-        console.error("Error en el endpoint de descarga:", error);
-        res.status(500).send("Ocurrió un error al intentar descargar el archivo.");
-    }
-});
-
 
 // --- Función que procesa el mensaje en segundo plano ---
 async function processMessage(body) {
@@ -100,7 +68,19 @@ async function generateGeminiResponse(history) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
 
-    const systemInstructions = "Eres un asistente de citas para un consultorio oftalmológico. Tu única función es agendar citas. Debes ser capaz de interpretar fechas y horas a partir de expresiones como 'mañana', 'el lunes de la semana que viene', 'pasado mañana' o 'el jueves siguiente', y convertirlas a un formato de fecha completo. No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. Cuando tengas el nombre completo, número de teléfono, fecha y hora del cliente, debes devolver un objeto JSON con los siguientes campos: 'nombre', 'telefono', 'fecha' y 'hora'. La fecha debe estar en formato 'YYYY-MM-DD'. No incluyas ningún otro texto o puntuación antes o después del JSON.";
+    const systemInstructions = `Eres un asistente de citas para el consultorio del Doctor Lucas. Tu única función es agendar citas.
+    
+    Reglas de agendamiento:
+    - Consultas en el consultorio: Lunes a viernes, de 8 AM a 11 AM. Costo: $25.
+    - Consultas a domicilio: Lunes a viernes, de 3 PM a 7 PM. Costo: $30.
+    
+    Si el cliente menciona que quiere pagar por adelantado, pídele el código de referencia de la transferencia o pago móvil.
+    
+    Cuando tengas el nombre completo, número de teléfono, fecha, hora y el tipo de cita, debes devolver un objeto JSON con los siguientes campos: 'nombre', 'telefono', 'fecha', 'hora', 'tipoCita' y opcionalmente 'referenciaPago'.
+    
+    Si el cliente envía una referencia de pago en un mensaje posterior a haber agendado su cita, debes responder preguntando nuevamente su nombre para buscar el registro y confirmarlo. Luego, cuando el cliente envíe su nombre junto a la referencia de pago, debes devolver un objeto JSON con los campos 'nombre', 'telefono' y 'referenciaPago', dejando los demás campos vacíos. Esto servirá para actualizar el registro del cliente en la base de datos.
+    
+    No respondas a preguntas médicas, de facturación o de otro tipo que no sean agendar. No incluyas ningún otro texto o puntuación antes o después del JSON.`;
 
     const payload = {
         contents: history,
@@ -118,8 +98,10 @@ async function generateGeminiResponse(history) {
                     telefono: { "type": "STRING" },
                     fecha: { "type": "STRING" },
                     hora: { "type": "STRING" },
+                    tipoCita: { "type": "STRING", "enum": ["Consultorio", "Domicilio"] },
+                    referenciaPago: { "type": "STRING" }
                 },
-                required: ["nombre", "telefono", "fecha", "hora"]
+                required: ["nombre"]
             }
         }
     };
@@ -130,24 +112,22 @@ async function generateGeminiResponse(history) {
     for (let i = 0; i < maxRetries; i++) {
         try {
             const response = await axios.post(url, payload, {
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+                headers: { 'Content-Type': 'application/json' }
             });
 
             const responseData = response.data;
-            if (responseData && responseData.candidates && responseData.candidates.length > 0) {
+            if (responseData?.candidates?.length > 0) {
                 const firstCandidate = responseData.candidates[0];
-                if (firstCandidate.content && firstCandidate.content.parts) {
+                if (firstCandidate.content?.parts?.length > 0) {
                     for (const part of firstCandidate.content.parts) {
                         if (part.text) {
                             try {
                                 const appointmentDetails = JSON.parse(part.text);
-                                console.log("Se ha recibido la señal para agendar la cita y los datos JSON:", appointmentDetails);
+                                console.log("JSON de Gemini recibido:", appointmentDetails);
                                 await handleAppointmentFlow(appointmentDetails);
                                 return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
                             } catch (e) {
-                                console.log("Respuesta de Gemini recibida exitosamente, en modo conversacional.");
+                                console.log("Respuesta de Gemini recibida, en modo conversacional.");
                                 return part.text;
                             }
                         }
@@ -155,7 +135,7 @@ async function generateGeminiResponse(history) {
                 }
             }
         } catch (error) {
-            if (error.response && error.response.status === 429) {
+            if (error.response?.status === 429) {
                 console.error(`Error 429: Demasiadas solicitudes. Reintento ${i + 1} de ${maxRetries}...`);
                 const delay = Math.pow(2, i) * 10000;
                 if (i < maxRetries - 1) {
@@ -178,27 +158,41 @@ async function generateGeminiResponse(history) {
 // --- Funciones para la Gestión de la Cita ---
 async function handleAppointmentFlow(appointmentDetails) {
     try {
-        // Log para verificar las variables de entorno
-        console.log("Verificando AIRTABLE_API_KEY:", process.env.AIRTABLE_API_KEY ? "Cargada" : "Falta");
-        console.log("Verificando AIRTABLE_BASE_ID:", process.env.AIRTABLE_BASE_ID ? "Cargada" : "Falta");
-        
         console.log("Detalles de la cita a procesar:", appointmentDetails);
-        const existingRecord = await findRecordByPhoneNumber(appointmentDetails.telefono);
 
-        if (existingRecord) {
-            console.log("Ya existe un registro. Actualizando cita...");
-            await updateAirtableRecord(existingRecord.id, appointmentDetails);
-            console.log("Registro en Airtable actualizado con éxito.");
+        // Si la referencia de pago está presente, es una actualización
+        if (appointmentDetails.referenciaPago && appointmentDetails.nombre) {
+            const record = await findRecordByName(appointmentDetails.nombre);
+            if (record) {
+                await updateAirtableRecord(record.id, { "Referencia": appointmentDetails.referenciaPago });
+                console.log("Campo de Referencia en Airtable actualizado con éxito.");
+            } else {
+                console.log("No se encontró un registro con ese nombre para actualizar.");
+            }
+        } else if (appointmentDetails.nombre && appointmentDetails.telefono && appointmentDetails.fecha && appointmentDetails.hora) {
+            // Si tiene todos los datos, es una nueva cita o una actualización completa
+            const existingRecord = await findRecordByPhoneNumber(appointmentDetails.telefono);
+            const airtableRecord = {
+                "Nombre": appointmentDetails.nombre,
+                "Teléfono": appointmentDetails.telefono,
+                "Fecha": `${appointmentDetails.fecha}T${appointmentDetails.hora}:00`,
+                "Tipo de Cita": appointmentDetails.tipoCita,
+                "Referencia": appointmentDetails.referenciaPago || ""
+            };
+
+            if (existingRecord) {
+                console.log("Ya existe un registro. Actualizando cita...");
+                await updateAirtableRecord(existingRecord.id, airtableRecord);
+                console.log("Registro en Airtable actualizado con éxito.");
+            } else {
+                console.log("No existe un registro. Creando nueva cita...");
+                await createAirtableRecord(airtableRecord);
+                console.log("Nuevo registro en Airtable creado con éxito.");
+            }
         } else {
-            console.log("No existe un registro. Creando nueva cita...");
-            await createAirtableRecord(appointmentDetails);
-            console.log("Nuevo registro en Airtable creado con éxito.");
+            console.log("Datos de cita incompletos o en un formato inesperado.");
         }
         
-        // Genera el PDF después de guardar/actualizar la cita
-        await createCalendarPDF(appointmentDetails.fecha);
-        console.log("PDF del calendario generado con éxito.");
-
     } catch (error) {
         console.error("Error en el flujo de agendamiento:", error);
         throw error;
@@ -215,7 +209,22 @@ async function findRecordByPhoneNumber(phoneNumber) {
         }).firstPage();
         return records[0] || null;
     } catch (error) {
-        console.error("Error buscando registro en Airtable:", error);
+        console.error("Error buscando registro en Airtable por teléfono:", error);
+        throw error;
+    }
+}
+
+// Función para encontrar un registro por nombre
+async function findRecordByName(name) {
+    try {
+        const table = airtableBase('Citas');
+        const records = await table.select({
+            view: "Grid view",
+            filterByFormula: `{Nombre} = '${name}'`
+        }).firstPage();
+        return records[0] || null;
+    } catch (error) {
+        console.error("Error buscando registro en Airtable por nombre:", error);
         throw error;
     }
 }
@@ -224,11 +233,7 @@ async function findRecordByPhoneNumber(phoneNumber) {
 async function createAirtableRecord(details) {
     try {
         const table = airtableBase('Citas');
-        const createdRecord = await table.create({
-            "Nombre": details.nombre,
-            "Teléfono": details.telefono,
-            "Fecha": `${details.fecha}T${details.hora}:00`
-        });
+        const createdRecord = await table.create(details);
         return createdRecord;
     } catch (error) {
         console.error("Error creando registro en Airtable:", error);
@@ -240,10 +245,7 @@ async function createAirtableRecord(details) {
 async function updateAirtableRecord(recordId, details) {
     try {
         const table = airtableBase('Citas');
-        const updatedRecord = await table.update(recordId, {
-            "Nombre": details.nombre,
-            "Fecha": `${details.fecha}T${details.hora}:00`
-        });
+        const updatedRecord = await table.update(recordId, details);
         return updatedRecord;
     } catch (error) {
         console.error("Error actualizando registro en Airtable:", error);
@@ -251,83 +253,8 @@ async function updateAirtableRecord(recordId, details) {
     }
 }
 
-// --- Nueva funcionalidad: Generación de PDF de calendario ---
-async function createCalendarPDF(date) {
-    try {
-        console.log('Iniciando la generación del PDF...');
-        const doc = new PDFDocument();
-        const startOfMonth = moment(date).startOf('month');
-        const fileName = `calendario_citas_${startOfMonth.format('YYYY-MM')}.pdf`;
-        const filePath = path.join(__dirname, fileName);
-
-        doc.pipe(fs.createWriteStream(filePath));
-
-        // Título del documento
-        doc.fontSize(25).text(`Calendario de Citas`, { align: 'center' });
-        doc.fontSize(20).text(`${startOfMonth.format('MMMM YYYY')}`, { align: 'center' });
-        doc.moveDown();
-
-        const tableTop = doc.y;
-        const colWidth = 75;
-        const rowHeight = 70;
-        const left = 50;
-
-        const headers = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-        doc.font('Helvetica-Bold');
-        headers.forEach((header, i) => {
-            doc.text(header, left + i * colWidth, tableTop, { width: colWidth, align: 'center' });
-        });
-        doc.font('Helvetica');
-        doc.rect(left, tableTop + 20, colWidth * 7, 1).fill('#000');
-        
-        const filterMonth = startOfMonth.format('YYYY-MM');
-        console.log(`Buscando citas para el mes: ${filterMonth}`);
-        const records = await airtableBase('Citas').select({
-            view: "Grid view",
-            filterByFormula: `DATETIME_FORMAT({Fecha}, 'YYYY-MM') = '${filterMonth}'`
-        }).all();
-        
-        if (records.length === 0) {
-            console.log("No se encontraron citas para este mes.");
-            doc.moveDown(2).text('No hay citas agendadas para este mes.');
-        } else {
-            console.log(`Se encontraron ${records.length} citas.`);
-        }
-        
-        // Proceso de dibujo del calendario y citas
-        let currentDay = startOfMonth.clone();
-        let currentRow = 0;
-        while (currentDay.isSame(startOfMonth, 'month')) {
-            const dayOfWeek = currentDay.weekday();
-            const x = left + dayOfWeek * colWidth;
-            const y = tableTop + 25 + currentRow * rowHeight;
-            doc.text(currentDay.format('DD'), x + 5, y + 5);
-            
-            const citasDelDia = records.filter(record => moment(record.fields.Fecha).isSame(currentDay, 'day'));
-            let textY = y + 20;
-            citasDelDia.forEach(cita => {
-                doc.fontSize(8).text(`${moment(cita.fields.Fecha).format('HH:mm')} - ${cita.fields.Nombre}`, x + 5, textY, { width: colWidth - 5, lineGap: 0 });
-                textY += 10;
-            });
-            
-            // Dibuja la celda del calendario
-            doc.rect(x, y, colWidth, rowHeight).stroke('#ccc');
-
-            if (dayOfWeek === 6) {
-                currentRow++;
-            }
-            currentDay.add(1, 'day');
-        }
-
-        doc.end();
-
-    } catch (error) {
-        console.error("Error generando PDF:", error.message);
-    }
-}
-
-// --- Nueva funcionalidad: Programación de recordatorios ---
-cron.schedule('0 9 * * *', async () => { // Se ejecuta todos los días a las 9:00 AM
+// --- Programación de recordatorios (se mantiene) ---
+cron.schedule('0 9 * * *', async () => {
     console.log('Verificando citas para enviar recordatorios...');
     const tomorrow = moment().add(1, 'day').format('YYYY-MM-DD');
     
@@ -341,7 +268,7 @@ cron.schedule('0 9 * * *', async () => { // Se ejecuta todos los días a las 9:0
             const phoneNumber = record.fields.Teléfono;
             const appointmentDate = moment(record.fields.Fecha).format('LL');
             const appointmentTime = moment(record.fields.Fecha).format('h:mm A');
-            const message = `Recordatorio: Tienes una cita con ${record.fields.Nombre} mañana, ${appointmentDate} a las ${appointmentTime}. ¡Te esperamos!`;
+            const message = `Recordatorio: Tienes una cita con el Doctor Lucas mañana, ${appointmentDate} a las ${appointmentTime}. ¡Te esperamos!`;
             
             await sendTwilioResponse(phoneNumber, process.env.TWILIO_PHONE_NUMBER, message);
             console.log(`Recordatorio enviado a ${phoneNumber}`);
@@ -352,7 +279,7 @@ cron.schedule('0 9 * * *', async () => { // Se ejecuta todos los días a las 9:0
     }
 });
 
-// --- Función para enviar un mensaje usando la API de Twilio ---
+// --- Función para enviar un mensaje usando la API de Twilio (se mantiene) ---
 async function sendTwilioResponse(to, from, body) {
     const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
     const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
@@ -366,22 +293,19 @@ async function sendTwilioResponse(to, from, body) {
     const maxRetries = 10;
     for (let i = 0; i < maxRetries; i++) {
         try {
-            const response = await axios.post(twilioApiUrl, payload, {
-                auth: {
-                    username: TWILIO_ACCOUNT_SID,
-                    password: TWILIO_AUTH_TOKEN
-                }
+            await axios.post(twilioApiUrl, payload, {
+                auth: { username: TWILIO_ACCOUNT_SID, password: TWILIO_AUTH_TOKEN }
             });
             return;
         } catch (error) {
-            if (error.response && error.response.status === 429) {
+            if (error.response?.status === 429) {
                 console.error(`Error 429: Demasiadas solicitudes a Twilio. Reintento ${i + 1} de ${maxRetries}...`);
                 const delay = Math.pow(2, i) * 1000;
                 if (i < maxRetries - 1) {
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue;
                 } else {
-                    console.error("Máximo de reintentos alcanzado para Twilio. Fallando. Se ignorará el error para no detener el flujo de la aplicación.");
+                    console.error("Máximo de reintentos alcanzado para Twilio. Fallando.");
                     return;
                 }
             } else {
@@ -395,5 +319,4 @@ async function sendTwilioResponse(to, from, body) {
 // Inicia el servidor de Express en el puerto configurado.
 app.listen(port, () => {
     console.log(`Servidor escuchando en http://localhost:${port}`);
-    console.log(`Ahora el PDF se generará automáticamente.`);
 });
