@@ -23,8 +23,11 @@ const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 app.post('/whatsapp-webhook', (req, res) => {
+    // Envía la respuesta 'OK' de inmediato para evitar que Twilio reintente la solicitud.
     res.send('OK');
-    processMessage(req.body);
+
+    // Procesa el mensaje de forma asíncrona para no bloquear la respuesta.
+    setImmediate(() => processMessage(req.body));
 });
 
 // --- Función que procesa el mensaje en segundo plano ---
