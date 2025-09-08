@@ -400,8 +400,6 @@ async function generateGeminiResponse(history) {
                     telefono: { "type": "STRING" },
                     fecha: { "type": "STRING" },
                     hora: { "type": "STRING" },
-                    tipoCita: { "type": "STRING" },
-                    costo: { "type": "NUMBER" },
                     referenciaPago: { "type": "STRING" }
                 }
             }
@@ -501,13 +499,25 @@ async function handleAppointmentFlow(appointmentDetails) {
 
 // Función que formatea los datos para Airtable
 function formatAppointmentForAirtable(appointmentDetails) {
+    const appointmentHour = parseInt(appointmentDetails.hora.split(':')[0]);
+    let tipoCita = "";
+    let costo = 0;
+
+    if (appointmentHour >= 8 && appointmentHour <= 11) {
+        tipoCita = "En el consultorio";
+        costo = 25;
+    } else if (appointmentHour >= 15 && appointmentHour <= 19) {
+        tipoCita = "A domicilio";
+        costo = 30;
+    }
+
     const airtableRecord = {
         "Nombre": appointmentDetails.nombre,
         "Teléfono": appointmentDetails.telefono,
-        // Combina fecha y hora en el formato correcto para Airtable
+        // ¡Esta es la corrección! Se combinan la fecha y la hora en el campo "Fecha"
         "Fecha": `${appointmentDetails.fecha}T${appointmentDetails.hora}:00`,
-        "Tipo de Cita": appointmentDetails.tipoCita,
-        "Costo": appointmentDetails.costo,
+        "Tipo de Cita": tipoCita,
+        "Costo": costo,
         "Referencia": appointmentDetails.referenciaPago || ""
     };
     return airtableRecord;
