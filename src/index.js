@@ -67,7 +67,7 @@ async function processMessage(body) {
         }
 
     } catch (error) {
-        console.error(`Error procesando mensaje: ${error.message}`);
+                console.error(`Error procesando mensaje: ${error.message}`);
         await sendTwilioResponse(body.From, body.To, "Lo siento, hubo un problema procesando tu solicitud.");
     }
 }
@@ -173,7 +173,7 @@ async function generateGeminiResponse(history) {
                                 try {
                                     const appointmentDetails = JSON.parse(part.text);
                                     console.log("JSON de Gemini recibido:", appointmentDetails);
-                                    await saveAppointmentToAirtable(appointmentDetails);
+                                    await handleAppointmentFlow(appointmentDetails);
                                     return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
                                 } catch (e) {
                                     console.log("Error al parsear el JSON de Gemini. Devolviendo texto conversacional.");
@@ -221,16 +221,73 @@ function formatAppointmentForAirtable(appointmentDetails) {
 }
 
 // --- Funciones para la Gestión de la Cita ---
-async function saveAppointmentToAirtable(appointmentDetails) {
+async function handleAppointmentFlow(appointmentDetails) {
     try {
         console.log("Detalles de la cita a procesar:", appointmentDetails);
-        const airtableRecord = formatAppointmentForAirtable(appointmentDetails);
-        console.log("Objeto para Airtable:", airtableRecord);
-        await createAirtableRecord(airtableRecord);
-        console.log("Nuevo registro en Airtable creado con éxito.");
+
+        // Si la referencia de pago está presente, es una actualización
+        if (appointmentDetails.referenciaPago && appointmentDetails.nombre) {
+            const record = await findRecordByName(appointmentDetails.nombre);
+            if (record) {
+                console.log("Actualizando referencia de pago en Airtable...");
+                await updateAirtableRecord(record.id, { "Referencia": appointmentDetails.referenciaPago });
+                console.log("Campo de Referencia en Airtable actualizado con éxito.");
+            } else {
+                console.log("No se encontró un registro con ese nombre para actualizar.");
+            }
+        } else if (appointmentDetails.nombre && appointmentDetails.telefono && appointmentDetails.fecha && appointmentDetails.hora) {
+            // Si tiene todos los datos, es una nueva cita o una actualización completa
+            const existingRecord = await findRecordByPhoneNumber(appointmentDetails.telefono);
+
+            if (existingRecord) {
+                console.log("Ya existe un registro. Actualizando cita...");
+                const airtableRecord = formatAppointmentForAirtable(appointmentDetails);
+                console.log("Objeto para Airtable:", airtableRecord);
+                await updateAirtableRecord(existingRecord.id, airtableRecord);
+                console.log("Registro en Airtable actualizado con éxito.");
+            } else {
+                console.log("No existe un registro. Creando nueva cita...");
+                const airtableRecord = formatAppointmentForAirtable(appointmentDetails);
+                console.log("Objeto para Airtable:", airtableRecord);
+                await createAirtableRecord(airtableRecord);
+                console.log("Nuevo registro en Airtable creado con éxito.");
+            }
+        } else {
+            console.log("Datos de cita incompletos o en un formato inesperado.");
+        }
         
     } catch (error) {
         console.error("Error en el flujo de agendamiento:", error.message);
+        throw error;
+    }
+}
+
+// Función para encontrar un registro por número de teléfono
+async function findRecordByPhoneNumber(phoneNumber) {
+    try {
+        const table = airtableBase('Citas');
+        const records = await table.select({
+            view: "Grid view",
+            filterByFormula: `{Teléfono} = '${phoneNumber}'`
+        }).firstPage();
+        return records[0] || null;
+    } catch (error) {
+        console.error("Error buscando registro en Airtable por teléfono:", error.message);
+        throw error;
+    }
+}
+
+// Función para encontrar un registro por nombre
+async function findRecordByName(name) {
+    try {
+        const table = airtableBase('Citas');
+        const records = await table.select({
+            view: "Grid view",
+            filterByFormula: `{Nombre} = '${name}'`
+        }).firstPage();
+        return records[0] || null;
+    } catch (error) {
+        console.error("Error buscando registro en Airtable por nombre:", error.message);
         throw error;
     }
 }
@@ -243,6 +300,18 @@ async function createAirtableRecord(details) {
         return createdRecord;
     } catch (error) {
         console.error("Error creando registro en Airtable:", error.message);
+        throw error;
+    }
+}
+
+// Función para actualizar un registro existente en Airtable.
+async function updateAirtableRecord(recordId, details) {
+    try {
+        const table = airtableBase('Citas');
+        const updatedRecord = await table.update(recordId, details);
+        return updatedRecord;
+    } catch (error) {
+        console.error("Error actualizando registro en Airtable:", error.message);
         throw error;
     }
 }
