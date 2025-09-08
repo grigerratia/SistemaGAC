@@ -209,13 +209,12 @@ async function generateGeminiResponse(history) {
 }
 
 // --- Función que formatea los datos para Airtable ---
-function formatAppointmentForAirtable(appointmentDetails, existingRecordId = null) {
+function formatAppointmentForAirtable(appointmentDetails) {
     const airtableRecord = {
         "Nombre": appointmentDetails.nombre,
         "Teléfono": appointmentDetails.telefono,
         // Combina fecha y hora en el formato correcto para Airtable
         "Fecha": `${appointmentDetails.fecha}T${appointmentDetails.hora}:00`,
-        "Tipo de Cita": appointmentDetails.tipoCita,
         "Referencia": appointmentDetails.referenciaPago || ""
     };
     return airtableRecord;
