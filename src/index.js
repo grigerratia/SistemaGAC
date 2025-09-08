@@ -23,8 +23,10 @@ const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 app.post('/whatsapp-webhook', (req, res) => {
-    // Envía la respuesta 'OK' de inmediato para evitar que Twilio reintente la solicitud.
-    res.send('OK');
+    // Envía una respuesta TwiML vacía de inmediato para evitar que Twilio reintente.
+    // Esto es el formato XML correcto que Twilio espera.
+    res.writeHead(200, { 'Content-Type': 'text/xml' });
+    res.end('<Response/>');
 
     // Procesa el mensaje de forma asíncrona para no bloquear la respuesta.
     setImmediate(() => processMessage(req.body));
@@ -166,12 +168,18 @@ async function generateGeminiResponse(history) {
                 if (firstCandidate.content?.parts?.length > 0) {
                     for (const part of firstCandidate.content.parts) {
                         if (part.text) {
-                            try {
-                                const appointmentDetails = JSON.parse(part.text);
-                                console.log("JSON de Gemini recibido:", appointmentDetails);
-                                await handleAppointmentFlow(appointmentDetails);
-                                return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
-                            } catch (e) {
+                            // Verifica si la respuesta de Gemini es un JSON válido
+                            if (part.text.trim().startsWith('{') && part.text.trim().endsWith('}')) {
+                                try {
+                                    const appointmentDetails = JSON.parse(part.text);
+                                    console.log("JSON de Gemini recibido:", appointmentDetails);
+                                    await handleAppointmentFlow(appointmentDetails);
+                                    return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
+                                } catch (e) {
+                                    console.log("Error al parsear el JSON de Gemini. Devolviendo texto conversacional.");
+                                    return "Lo siento, tuve un problema con la información que me enviaste. ¿Podrías confirmarme todos los datos de nuevo por favor?";
+                                }
+                            } else {
                                 console.log("Respuesta de Gemini recibida, en modo conversacional.");
                                 return part.text;
                             }
