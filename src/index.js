@@ -17,7 +17,7 @@ app.use(bodyParser.urlencoded({ extended: false }));
 const conversationHistory = {};
 
 // Configura Airtable con las variables de entorno.
-const airtableBase = new Airtable({ apiKey: process.env.AIRTABLE_API_KEY }).base(process.env.AIRTABLE_BASE_ID);
+const airtableBase = new Airtable({ apiKey: process.env.env.AIRTABLE_API_KEY }).base(process.env.AIRTABLE_BASE_ID);
 
 // --- EL ENDPOINT PRINCIPAL PARA TWILIO ---
 app.post('/whatsapp-webhook', (req, res) => {
@@ -66,10 +66,13 @@ async function processMessage(body) {
 async function generateGeminiResponse(history) {
     const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
     const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent";
+    
+    const today = new Date();
+    const todayString = today.toISOString().split('T')[0];
 
     const systemInstructions = `Eres un asistente de citas para el consultorio oftalmológico del Doctor Lucas. Tu única función es agendar citas.
 
-**La fecha actual es 2025-09-08.**
+**La fecha actual es ${todayString}.**
 
 Reglas de agendamiento:
 - Consultas en el consultorio: Lunes a viernes, de 8 AM a 11 AM.
@@ -111,7 +114,12 @@ No respondas a preguntas médicas, de facturación o de otro tipo que no sean ag
                     for (const part of firstCandidate.content.parts) {
                         if (part.text) {
                             try {
-                                const appointmentDetails = JSON.parse(part.text);
+                                let cleanResponse = part.text.trim();
+                                if (cleanResponse.startsWith('```json') && cleanResponse.endsWith('```')) {
+                                    cleanResponse = cleanResponse.substring(7, cleanResponse.length - 3).trim();
+                                }
+
+                                const appointmentDetails = JSON.parse(cleanResponse);
                                 console.log("Se ha recibido la señal para agendar la cita y los datos JSON:", appointmentDetails);
                                 await handleAppointmentFlow(appointmentDetails);
                                 return "¡Excelente! Tu cita ha sido agendada con éxito. Te esperamos.";
