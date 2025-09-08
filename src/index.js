@@ -75,7 +75,7 @@ Reglas de agendamiento:
 
 Para agendar una cita, necesitas el nombre completo, número de teléfono, fecha y hora.
 
-**ATENCIÓN**: Solo debes responder con un objeto JSON si la conversación te ha proporcionado **todos** los siguientes datos: 'nombre', 'telefono', 'fecha' y 'hora'. La fecha debe estar en formato YYYY-MM-DD. Si falta alguno de estos datos, **NO** generes el JSON y continúa la conversación de forma natural para solicitarlos.
+**IMPORTANTE**: Solo debes responder con un objeto JSON si la conversación te ha proporcionado **todos** los siguientes datos: 'nombre', 'telefono', 'fecha' y 'hora'. La fecha debe estar en formato YYYY-MM-DD. Si falta alguno de estos datos, **NO** generes el JSON y continúa la conversación de forma natural para solicitarlos.
 
 Si el cliente envía una referencia de pago en un mensaje posterior a haber agendado su cita, debes responder preguntando nuevamente su nombre para buscar el registro y confirmarlo. Luego, cuando el cliente envíe su nombre junto a la referencia de pago, debes devolver un objeto JSON con los campos 'nombre', 'telefono' y 'referenciaPago', dejando los demás campos vacíos. Esto servirá para actualizar el registro del cliente en la base de datos.
  
@@ -88,18 +88,7 @@ No respondas a preguntas médicas, de facturación o de otro tipo que no sean ag
         },
         generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 400,
-            responseMimeType: "application/json",
-            responseSchema: {
-                type: "OBJECT",
-                properties: {
-                    nombre: { "type": "STRING" },
-                    telefono: { "type": "STRING" },
-                    fecha: { "type": "STRING" },
-                    hora: { "type": "STRING" },
-                },
-                required: ["nombre", "telefono", "fecha", "hora"]
-            }
+            maxOutputTokens: 400
         },
     };
 
@@ -163,12 +152,6 @@ async function handleAppointmentFlow(appointmentDetails) {
         if (airtableResponse) {
             console.log("Registro en Airtable creado con éxito.");
         }
-
-        const calendlyResponse = await createCalendlyEvent(appointmentDetails);
-        if (calendlyResponse) {
-            console.log("Evento de Calendly creado con éxito.");
-        }
-
     } catch (error) {
         console.error("Error en el flujo de agendamiento:", error);
     }
@@ -189,41 +172,6 @@ async function createAirtableRecord(details) {
         return createdRecord;
     } catch (error) {
         console.error("Error creando registro en Airtable:", error);
-        throw error;
-    }
-}
-
-// Función para crear un nuevo evento en Calendly usando axios.
-async function createCalendlyEvent(details) {
-    const CALENDLY_API_URL = "https://api.calendly.com";
-    const CALENDLY_TOKEN = process.env.CALENDLY_PERSONAL_ACCESS_TOKEN;
-    const CALENDLY_EVENT_TYPE_URI = process.env.CALENDLY_EVENT_TYPE_URI;
-
-    try {
-        const inviteeEmail = "ejemplo@ejemplo.com";
-        const inviteeName = details.nombre;
-        const startTime = `${details.fecha}T${details.hora}:00Z`;
-
-        const payload = {
-            invitee_email: inviteeEmail,
-            event_type: CALENDLY_EVENT_TYPE_URI,
-            invitee: {
-                name: inviteeName,
-                email: inviteeEmail,
-            },
-            start_time: startTime
-        };
-
-        const response = await axios.post(`${CALENDLY_API_URL}/scheduled_events`, payload, {
-            headers: {
-                'Authorization': `Bearer ${CALENDLY_TOKEN}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        return response.data;
-    } catch (error) {
-        console.error("Error creando evento en Calendly:", error.response ? error.response.data : error.message);
         throw error;
     }
 }
